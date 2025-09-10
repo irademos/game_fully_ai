@@ -1,5 +1,5 @@
 {
-  "name": "multiplayer_game",
+  "name": "game_fully_ai",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -9,15 +9,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/irademos/multiplayer_game.git"
+    "url": "git+https://github.com/irademos/game_fully_ai.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/irademos/multiplayer_game/issues"
+    "url": "https://github.com/irademos/game_fully_ai/issues"
   },
-  "homepage": "https://github.com/irademos/multiplayer_game#readme",
+  "homepage": "https://github.com/irademos/game_fully_ai#readme",
   "description": "",
   "devDependencies": {
     "vite": "^6.3.4"
