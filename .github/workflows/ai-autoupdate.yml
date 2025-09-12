@@ -26,8 +26,8 @@ jobs:
           branch: main
           aider_args: >
             --yes
-            --message "For this run, make a trivial, safe change to prove the loop works:
-            append a 'Last updated by AI: <date>' line to README.md. Keep build passing."
+            --add README.md src/**/*.js
+            --message "Implement a minimal feature in the Three.js multiplayer game."
 
 
       # Optional: quick sanity checks before commit
