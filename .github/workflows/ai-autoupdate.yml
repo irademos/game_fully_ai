@@ -17,15 +17,18 @@ jobs:
 
       # Aider-in-a-box; will edit files in-place
       - name: Run Aider (AI maintainer)
-        uses: mirrajabi/aider-chat-action@v1
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        uses: mirrajabi/aider-github-action@v1.1.0
+        timeout-minutes: 10
         with:
-          args: >
-            --model gpt-4o-mini
-            --message "Incrementally expand an open-world Three.js multiplayer game:
-            small, safe commits; keep build passing; add tests,
-            docs, and TODOs; prefer minimal diffs per run."
+          # choose the provider you actually use
+          api_key_env_name: OPENAI_API_KEY
+          api_key_env_value: ${{ secrets.OPENAI_API_KEY }}
+          model: gpt-4o-mini
+          branch: main
+          aider_args: >
+            --yes
+            --message "Incrementally expand the Three.js multiplayer game.
+            Keep diffs small, ensure build passes, add tests/docs as needed."
 
       # Optional: quick sanity checks before commit
       - name: Install deps & check build
