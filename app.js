@@ -14,6 +14,7 @@ import { AudioManager } from './audioManager.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { createPerfOverlay } from "./ui/perfOverlay.js";
 import { initControlsHelp } from "./ui/controlsHelp.js";
+import { createGroundGrid } from "./helpers/groundGrid.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -42,6 +43,7 @@ async function main() {
   scene.background = new THREE.Color(0x87CEEB);
 
   createClouds(scene);
+  createGroundGrid(THREE, scene);
 
   let monster = null;
   loadMonsterModel(scene, data => {
