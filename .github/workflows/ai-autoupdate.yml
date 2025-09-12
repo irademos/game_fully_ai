@@ -1,0 +1,49 @@
+name: ai-autoupdate
+on:
+  schedule: [{ cron: "*/60 * * * *" }] # hourly; tune as needed
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  update-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, ref: main }
+      - name: Set up Node (for your threejs build checks later)
+        uses: actions/setup-node@v4
+        with: { node-version: "20" }
+
+      # Aider-in-a-box; will edit files in-place
+      - name: Run Aider (AI maintainer)
+        uses: mirrajabi/aider-chat-action@v1
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          args: >
+            --model gpt-4o-mini
+            --message "Incrementally expand an open-world Three.js multiplayer game:
+            small, safe commits; keep build passing; add tests,
+            docs, and TODOs; prefer minimal diffs per run."
+
+      # Optional: quick sanity checks before commit
+      - name: Install deps & check build
+        run: |
+          npm ci || npm i
+          npm run lint --if-present
+          npm test --if-present
+          npm run build --if-present
+
+      - name: Commit & push to main if changed
+        run: |
+          git config user.name "ai-bot"
+          git config user.email "ai-bot@users.noreply.github.com"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add -A
+            git commit -m "AI: incremental updates"
+            git push origin HEAD:main
+          else
+            echo "No changes."
+          fi
