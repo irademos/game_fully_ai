@@ -13,6 +13,7 @@ import { initSpeechCommands } from './speechCommands.js';
 import { AudioManager } from './audioManager.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { createPerfOverlay } from "./ui/perfOverlay.js";
+import { initControlsHelp } from "./ui/controlsHelp.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -77,6 +78,7 @@ async function main() {
   document.getElementById('game-container').appendChild(renderer.domElement);
 
   const perf = createPerfOverlay();
+  initControlsHelp();
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
