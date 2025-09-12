@@ -347,8 +347,40 @@ async function main() {
   // Expose remote players map for global access (e.g., controls)
   window.otherPlayers = otherPlayers;
 
+  // --- Latency (Ping) tracking shown in Settings overlay ---
+  const pingDisplay = document.getElementById('ping-display');
+  const peerPings = {};
+  const pendingPings = new Map();
+  function updatePingUIValue() {
+    if (!pingDisplay) return;
+    const vals = Object.values(peerPings);
+    pingDisplay.textContent = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : '-';
+  }
+  function pingPeers() {
+    const myId = multiplayer.getId();
+    Object.keys(otherPlayers).forEach((peerId) => {
+      const nonce = Math.random().toString(36).slice(2);
+      pendingPings.set(peerId, { nonce, start: performance.now() });
+      multiplayer.send({ type: 'ping', from: myId, to: peerId, nonce, ts: Date.now() });
+    });
+  }
+  setInterval(pingPeers, 2000);
+
   function handleIncomingData(peerId, data) {
     console.log('📡 Incoming data:', data);
+    // --- Ping/Pong handling for latency measurement ---
+    if (data && data.type === 'ping' && data.to === multiplayer.getId()) {
+      multiplayer.send({ type: 'pong', from: multiplayer.getId(), to: data.from, nonce: data.nonce, ts: data.ts });
+    }
+    if (data && data.type === 'pong' && data.to === multiplayer.getId()) {
+      const pending = pendingPings.get(peerId);
+      if (pending && pending.nonce === data.nonce) {
+        const rtt = Math.round(performance.now() - pending.start);
+        peerPings[peerId] = rtt;
+        pendingPings.delete(peerId);
+        updatePingUIValue();
+      }
+    }
     if (data.type === "presence") {
       if (!otherPlayers[data.id]) {
         const other = new PlayerCharacter(data.name);
