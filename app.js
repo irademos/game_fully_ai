@@ -12,6 +12,7 @@ import { updateMeleeAttacks } from './melee.js';
 import { initSpeechCommands } from './speechCommands.js';
 import { AudioManager } from './audioManager.js';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { createPerfOverlay } from "./ui/perfOverlay.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -74,6 +75,8 @@ async function main() {
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
+
+  const perf = createPerfOverlay();
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -533,6 +536,7 @@ async function main() {
 
   function animate() {
     requestAnimationFrame(animate);
+    const _noop = perf && typeof perf.onFrame === 'function' ? perf.onFrame() : undefined;
 
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
