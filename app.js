@@ -3,26 +3,18 @@ import * as THREE from "three";
 import { PlayerCharacter } from "./characters/PlayerCharacter.js";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { createOrcVoice } from "./orcVoice.js";
-import { createClouds, generateIsland, createMoon, MOON_RADIUS } from "./worldGeneration.js";
-import { isPointInWater, initWaves, spawnOceanWave, updateWaves, getWaveForceAt } from './water.js';
+import { createClouds } from "./worldGeneration.js";
 import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls.js';
 import { getCookie, setCookie } from './utils.js';
 import { spawnProjectile, updateProjectiles } from './projectiles.js';
 import { updateMeleeAttacks } from './melee.js';
-import { LevelLoader } from './levelLoader.js';
-import { BreakManager } from './breakManager.js';
 import { initSpeechCommands } from './speechCommands.js';
-import { LevelBuilder } from './levelBuilderMode.js';
 import { AudioManager } from './audioManager.js';
-import { Spaceship } from './spaceship.js';
-import { Surfboard } from './surfboard.js';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { applyGlobalGravity } from "./gravity.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
-
 
 // --- Rapier demo state ---
 let rapierWorld;
@@ -48,16 +40,6 @@ async function main() {
   scene.background = new THREE.Color(0x87CEEB);
 
   createClouds(scene);
-
-  let spaceship;
-  let surfboard;
-
-  // Load additional level data (destructible props, etc.)
-  const breakManager = new BreakManager(scene);
-  const levelLoader = new LevelLoader(scene, { breakManager });
-  // await levelLoader.loadManifest('/areas/demo/demo_area.json');
-  // Expose to window for debugging
-  window.breakManager = breakManager;
 
   let monster = null;
   loadMonsterModel(scene, data => {
@@ -110,7 +92,6 @@ async function main() {
   rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   window.rapierWorld = rapierWorld;
   window.rbToMesh = rbToMesh;
-  breakManager.setWorld(rapierWorld);
 
   // Ground collider
   {
@@ -122,20 +103,6 @@ async function main() {
       groundRb
     );
   }
-
-  generateIsland(scene);
-  initWaves(scene);
-  // Prime with an initial distant wave
-  spawnOceanWave();
-  createMoon(scene, rapierWorld, rbToMesh);
-
-  spaceship = new Spaceship(scene, rapierWorld, rbToMesh);
-  await spaceship.load();
-  window.spaceship = spaceship;
-
-  surfboard = new Surfboard(scene, rapierWorld, rbToMesh);
-  await surfboard.load();
-  window.surfboard = surfboard;
 
   function attachMonsterPhysics(mon) {
     const rbDesc = RAPIER.RigidBodyDesc.dynamic()
@@ -150,8 +117,6 @@ async function main() {
   }
 
   if (monster) attachMonsterPhysics(monster);
-
-
 
   const player = new PlayerCharacter(playerName, characterModel);
   const playerModel = player.model;
@@ -186,40 +151,6 @@ async function main() {
     audioManager
   });
   window.playerControls = playerControls;
-
-  const levelBuilder = new LevelBuilder({ scene, camera, renderer });
-  const builderBtn = document.getElementById('level-builder-button');
-  builderBtn?.addEventListener('click', () => {
-    levelBuilder.toggle();
-    playerControls.enabled = !levelBuilder.active;
-  });
-
-  // Wave spawn timing (less frequent) and constant push during pass
-  let nextWaveIn = 10 + Math.random() * 6; // seconds
-  function scheduleNextWave() {
-    nextWaveIn = 10 + Math.random() * 6; // 10–16s between waves
-  }
-
-  function applyWaveForces() {
-    if (playerControls.body && playerControls.isInWater && (!playerControls.vehicle || playerControls.vehicle.type !== 'surfboard')) {
-      const t = playerControls.body.translation();
-      const f = getWaveForceAt(t.x, t.z);
-      if (f.x !== 0 || f.z !== 0) {
-        playerControls.body.applyImpulse({ x: f.x, y: 0, z: f.z }, true);
-      }
-    }
-
-    if (surfboard?.body) {
-      const t = surfboard.body.translation();
-      if (isPointInWater(t.x, t.z)) {
-        const f = getWaveForceAt(t.x, t.z);
-        if (f.x !== 0 || f.z !== 0) {
-          surfboard.body.applyImpulse({ x: f.x, y: 0, z: f.z }, true);
-        }
-      }
-    }
-  }
-
 
   // --- RAPIER HELPERS ---
   function spawnBlock({
@@ -433,29 +364,9 @@ async function main() {
       const terrainY = 0;
       const targetY = Math.max(data.y ?? terrainY, terrainY);
       player.model.position.y = targetY;
-
       player.model.rotation.y = data.rotation;
-      const moon = window.moon;
-      if (moon) {
-        const moonPos = moon.position;
-        const playerPos = player.model.position;
-        const dist = playerPos.distanceTo(moonPos);
-        if (dist < MOON_RADIUS * 2) {
-          const up = new THREE.Vector3().subVectors(playerPos, moonPos).normalize();
-          player.model.up.copy(up);
-          const forward = new THREE.Vector3(Math.sin(data.rotation), 0, Math.cos(data.rotation))
-            .projectOnPlane(up)
-            .normalize();
-          const target = playerPos.clone().add(forward);
-          player.model.lookAt(target);
-        } else {
-          player.model.up.set(0, 1, 0);
-          player.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), data.rotation);
-        }
-      } else {
-        player.model.up.set(0, 1, 0);
-        player.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), data.rotation);
-      }
+      player.model.up.set(0, 1, 0);
+      player.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), data.rotation);
 
       // Sync animation state if provided
       const actions = player.model.userData.actions;
@@ -508,11 +419,6 @@ async function main() {
     if (data.type === "monster" && monster) {
       const target = { x: data.x, y: data.y, z: data.z };
       monster.userData.rb?.setTranslation(target, true);
-    }
-
-    if (data.type === 'spaceship' && spaceship && !multiplayer.isHost) {
-      spaceship.body?.setTranslation({ x: data.x, y: data.y, z: data.z }, true);
-      spaceship.body?.setRotation({ x: data.rx, y: data.ry, z: data.rz, w: data.rw }, true);
     }
 
     if (data.type === 'grab') {
@@ -632,8 +538,6 @@ async function main() {
     // Accumulate variable rAF time into fixed physics steps
     physicsAccumulator += clock.getDelta();
     while (physicsAccumulator >= FIXED_DT) {
-      applyGlobalGravity(rapierWorld, window.moon);
-      applyWaveForces();
       rapierWorld.step();
       physicsAccumulator -= FIXED_DT;
     }
@@ -670,27 +574,7 @@ async function main() {
       }
     }
 
-
-
     playerControls.update();
-    surfboard.update();
-    if (multiplayer.isHost) {
-      spaceship.update();
-      if (spaceship.body) {
-        const t = spaceship.body.translation();
-        const r = spaceship.body.rotation();
-        multiplayer.send({
-          type: 'spaceship',
-          x: t.x,
-          y: t.y,
-          z: t.z,
-          rx: r.x,
-          ry: r.y,
-          rz: r.z,
-          rw: r.w
-        });
-      }
-    }
 
     updateHealthUI();
     if (window.localHealth <= 0 && !playerDead) {
@@ -708,13 +592,6 @@ async function main() {
     }
 
     const delta = mixerClock.getDelta();
-    // Update visible waves and spawn new ones less frequently
-    updateWaves(delta);
-    nextWaveIn -= delta;
-    if (nextWaveIn <= 0) {
-      spawnOceanWave();
-      scheduleNextWave();
-    }
 
     Object.values(otherPlayers).forEach(p => {
       p.model.userData.mixer?.update(delta);
@@ -771,10 +648,6 @@ async function main() {
     });
 
     updateMeleeAttacks({ playerModel, otherPlayers, monster, audioManager });
-
-    breakManager.update();
-
-    levelBuilder.update();
 
     renderer.render(scene, camera);
   }
