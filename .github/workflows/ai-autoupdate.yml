@@ -18,17 +18,17 @@ jobs:
       # Aider-in-a-box; will edit files in-place
       - name: Run Aider (AI maintainer)
         uses: mirrajabi/aider-github-action@v1.1.0
-        timeout-minutes: 10
+        timeout-minutes: 12
         with:
-          # choose the provider you actually use
           api_key_env_name: OPENAI_API_KEY
           api_key_env_value: ${{ secrets.OPENAI_API_KEY }}
           model: gpt-4o-mini
           branch: main
           aider_args: >
             --yes
-            --message "Incrementally expand the Three.js multiplayer game.
-            Keep diffs small, ensure build passes, add tests/docs as needed."
+            --message "For this run, make a trivial, safe change to prove the loop works:
+            append a 'Last updated by AI: <date>' line to README.md. Keep build passing."
+
 
       # Optional: quick sanity checks before commit
       - name: Install deps & check build
