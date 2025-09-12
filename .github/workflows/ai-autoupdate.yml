@@ -26,9 +26,44 @@ jobs:
           branch: main
           aider_args: >
             --yes
-            --add README.md src/**/*.js
-            --message "Implement a minimal feature in the Three.js multiplayer game."
-
+            --add *.js *.ts *.jsx *.tsx *.css *.json *.md *.html
+            --add scripts/**/*.js scripts/**/*.ts
+            --add characters/**/* models/**/* public/**/* 
+            --map-tokens 2048
+            --message "
+            You are the autonomous maintainer for an evolving Three.js multiplayer web app.
+            The repo layout is not fixed (no guaranteed src/). Each run must ship ONE small,
+            production-ready change that works immediately after deployment.
+          
+            ENTRY AUTO-DETECTION (use the first that exists):
+            1) index.html: <script type='module' src='...'> → that file is the entry.
+            2) package.json: check 'main', then 'module', then scripts (dev/build) hints.
+            3) Heuristic: file that creates the Three.js renderer/scene/animate loop.
+            After detection, wire new code by importing it into the entry and initializing once.
+          
+            FILE PLACEMENT RULES:
+            - Put new code alongside related modules in the existing structure (e.g., keep UI helpers near other UI code; game systems near other systems).
+            - If creating a new folder is cleaner, create it (e.g., scripts/ui, systems/, net/). Do NOT rely on a specific framework structure like src/.
+            - Export classes/functions from new modules; avoid top-level side effects on import.
+            - If UI is added, scope styles via a class name (no global selector collisions). Update index.html or a central stylesheet/import as needed.
+            - If assets are added, use /public or the repo’s existing assets area and fix paths/imports.
+          
+            WIRING & SAFETY:
+            - Ensure imports/exports resolve (correct relative paths).
+            - Initialize the feature in the detected entry only once, after the scene/app is ready.
+            - Do not break controls/camera/networking; avoid stealing keyboard focus during gameplay.
+            - If TypeScript files exist, add minimal types/jSDoc to keep the build passing.
+            - If the change risks breaking the build, downscope to a safer improvement (small bugfix, docs, minimal UI).
+          
+            DELIVERABLES:
+            - Only touch what is necessary for the new feature.
+            - Update README.md with a one-line changelog for this run.
+            - Commit message: 'feat:' or 'fix:' with a concise description.
+          
+            Examples of acceptable 'one-run' tasks: lightweight UI panel, simple in-game
+            overlay, minor system utility, small bugfix, code-splitting a heavy import, or
+            wiring an existing module so it actually shows up in the running app.
+            "
 
       # Optional: quick sanity checks before commit
       - name: Install deps & check build
