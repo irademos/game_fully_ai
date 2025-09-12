@@ -524,14 +524,20 @@ export class PlayerControls {
     if (this.playerModel) {
       const displayY = newY;
       this.playerModel.position.set(newX, displayY, newZ);
+      // Determine the yaw based on movement, preserving the last
+      // direction when the player stops. Only the yaw component is
+      // applied so releasing movement keys doesn't reset the model to
+      // its default orientation.
       let yawAngle = this.playerModel.rotation.y;
       if (movement.length() > 0) {
         yawAngle = Math.atan2(movement.x, movement.z);
-        this.playerModel.rotation.y = yawAngle;
       }
+      // Apply yaw rotation without overwriting other axes and avoid
+      // resetting the quaternion, which previously caused a 180° flip
+      // when movement keys were released.
+      this.playerModel.rotation.set(0, yawAngle, 0);
 
       this.playerModel.up.set(0, 1, 0);
-      this.playerModel.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
       this.camera.up.set(0, 1, 0);
       
       const actions = this.playerModel.userData.actions;
