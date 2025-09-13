@@ -15,6 +15,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { createPerfOverlay } from "./ui/perfOverlay.js";
 import { initControlsHelp } from "./ui/controlsHelp.js";
 import { createGroundGrid } from "./helpers/groundGrid.js";
+import { createScreenshotButton } from "./ui/screenshotButton.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -75,9 +76,10 @@ async function main() {
     }
   };
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
+  createScreenshotButton(renderer);
 
   const perf = createPerfOverlay();
   initControlsHelp();
