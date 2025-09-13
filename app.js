@@ -18,6 +18,7 @@ import { createGroundGrid } from "./helpers/groundGrid.js";
 import { createScreenshotButton } from "./ui/screenshotButton.js";
 import { createDayNightToggle } from "./ui/dayNightToggle.js";
 import { createCompassHUD } from "./ui/compassHUD.js";
+import { createPositionHUD } from "./ui/positionHUD.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -96,6 +97,7 @@ async function main() {
   });
 
   const compass = createCompassHUD();
+  const posHUD = createPositionHUD();
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
@@ -710,6 +712,9 @@ async function main() {
       compass.setHeading(headingDeg);
     }
 
+    if (posHUD && typeof posHUD.update === 'function') {
+      posHUD.update(playerModel.position, headingDeg);
+    }
     renderer.render(scene, camera);
   }
 
