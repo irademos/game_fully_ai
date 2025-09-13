@@ -16,6 +16,7 @@ import { createPerfOverlay } from "./ui/perfOverlay.js";
 import { initControlsHelp } from "./ui/controlsHelp.js";
 import { createGroundGrid } from "./helpers/groundGrid.js";
 import { createScreenshotButton } from "./ui/screenshotButton.js";
+import { createDayNightToggle } from "./ui/dayNightToggle.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -80,6 +81,7 @@ async function main() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
   createScreenshotButton(renderer);
+  createDayNightToggle({ scene, ambientLight, dirLight });
 
   const perf = createPerfOverlay();
   initControlsHelp();

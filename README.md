@@ -3,3 +3,4 @@ feat: add in-game FPS overlay (bottom-right) for immediate performance visibilit
 feat: add in-game Controls Help overlay ("? Help" button) with scoped styles, initialized once from app.js.
 feat: add subtle ground grid helper for immediate world orientation.
 feat: add in-game screenshot button (📸) to action bar; downloads a PNG of the current frame
+feat: add Day/Night toggle button (🌗) to switch scene lighting and sky.
