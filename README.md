@@ -6,3 +6,4 @@ feat: add subtle ground grid helper for immediate world orientation.
 feat: add in-game screenshot button (📸) to action bar; downloads a PNG of the current frame
 feat: add Day/Night toggle button (🌗) to switch scene lighting and sky.
 fix: initialize day/night toggle after lights are created to avoid undefined references and ensure it works on load.
+feat: add on-screen compass HUD showing camera heading (top-center).

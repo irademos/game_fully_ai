@@ -17,6 +17,7 @@ import { initControlsHelp } from "./ui/controlsHelp.js";
 import { createGroundGrid } from "./helpers/groundGrid.js";
 import { createScreenshotButton } from "./ui/screenshotButton.js";
 import { createDayNightToggle } from "./ui/dayNightToggle.js";
+import { createCompassHUD } from "./ui/compassHUD.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -93,6 +94,8 @@ async function main() {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
+
+  const compass = createCompassHUD();
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
@@ -699,6 +702,13 @@ async function main() {
     });
 
     updateMeleeAttacks({ playerModel, otherPlayers, monster, audioManager });
+
+    const viewDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const headingRad = Math.atan2(viewDir.x, viewDir.z);
+    const headingDeg = (THREE.MathUtils.radToDeg(headingRad) + 360) % 360;
+    if (compass && typeof compass.setHeading === 'function') {
+      compass.setHeading(headingDeg);
+    }
 
     renderer.render(scene, camera);
   }
