@@ -21,6 +21,7 @@ import { createCompassHUD } from "./ui/compassHUD.js";
 import { createPositionHUD } from "./ui/positionHUD.js";
 import { initScreenshotHotkey } from "./ui/screenshotHotkey.js";
 import { createFullscreenButton } from "./ui/fullscreenButton.js";
+import { createConnectionIndicator } from "./ui/connectionIndicator.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -102,6 +103,7 @@ async function main() {
 
   const compass = createCompassHUD();
   const posHUD = createPositionHUD();
+  const connIndicator = createConnectionIndicator();
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
@@ -378,7 +380,12 @@ async function main() {
   function updatePingUIValue() {
     if (!pingDisplay) return;
     const vals = Object.values(peerPings);
-    pingDisplay.textContent = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : '-';
+    const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+    pingDisplay.textContent = avg ?? '-';
+    if (connIndicator && typeof connIndicator.setStatus === 'function') {
+      const peers = Object.keys(multiplayer.connections || {}).length;
+      connIndicator.setStatus({ peers, avgPing: avg });
+    }
   }
   function pingPeers() {
     const myId = multiplayer.getId();
@@ -455,6 +462,12 @@ async function main() {
         list.appendChild(item);
       }
       conn.listItem.textContent = `Connected to ${data.name}`;
+      if (connIndicator && typeof connIndicator.setStatus === 'function') {
+        const peers = Object.keys(multiplayer.connections || {}).length;
+        const vals = Object.values(peerPings);
+        const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+        connIndicator.setStatus({ peers, avgPing: avg });
+      }
     }
 
     if (data.type === 'projectile') {
