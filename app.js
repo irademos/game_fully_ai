@@ -20,6 +20,7 @@ import { createDayNightToggle } from "./ui/dayNightToggle.js";
 import { createCompassHUD } from "./ui/compassHUD.js";
 import { createPositionHUD } from "./ui/positionHUD.js";
 import { initScreenshotHotkey } from "./ui/screenshotHotkey.js";
+import { createFullscreenButton } from "./ui/fullscreenButton.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -86,6 +87,7 @@ async function main() {
   document.getElementById('game-container').appendChild(renderer.domElement);
   createScreenshotButton(renderer);
   initScreenshotHotkey(renderer);
+  createFullscreenButton(renderer.domElement);
 
   const perf = createPerfOverlay();
   initControlsHelp();

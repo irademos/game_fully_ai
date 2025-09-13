@@ -9,3 +9,4 @@ fix: initialize day/night toggle after lights are created to avoid undefined ref
 feat: add on-screen compass HUD showing camera heading (top-center).
 feat: add position/heading HUD (bottom-left), updates each frame.
 feat: add K hotkey to instantly download a screenshot of the current view.
+feat: add fullscreen toggle button to action bar (enter/exit fullscreen).
