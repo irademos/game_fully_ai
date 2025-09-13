@@ -81,7 +81,6 @@ async function main() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
   createScreenshotButton(renderer);
-  createDayNightToggle({ scene, ambientLight, dirLight });
 
   const perf = createPerfOverlay();
   initControlsHelp();
@@ -95,6 +94,7 @@ async function main() {
   dirLight.position.set(5, 10, 5);
   dirLight.castShadow = true;
   scene.add(dirLight);
+  createDayNightToggle({ scene, ambientLight, dirLight });
 
 
 
