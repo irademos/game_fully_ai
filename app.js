@@ -328,19 +328,6 @@ async function main() {
     onBurstStop: () => stopBurst()
   });
 
-  // Rain toggle button
-  const rainBtn = document.getElementById('rain-toggle');
-  if (rainBtn) {
-    let active = false;
-    const updateLabel = () => { rainBtn.textContent = active ? "⛅" : "🌧️"; };
-    updateLabel();
-    rainBtn.addEventListener('click', () => {
-      active = !active;
-      rain.setActive(active);
-      updateLabel();
-    });
-  }
-
   // ESC toggles Pause/Resume
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') {
@@ -625,17 +612,93 @@ async function main() {
 
   let localStream = null;
   let micActive = false;
-  const voiceButton = document.getElementById('voice-button');
+  const moreActionsButton = document.getElementById('more-actions-button');
+  const moreActionsMenu = document.getElementById('more-actions-menu');
+  let collapseMoreActionsMenu = null;
 
-  voiceButton.addEventListener('click', async () => {
-    if (!micActive) {
+  if (moreActionsButton && moreActionsMenu) {
+    const closeMenu = () => {
+      if (moreActionsMenu.classList.contains('hidden')) return;
+      moreActionsMenu.classList.add('hidden');
+      moreActionsButton.setAttribute('aria-expanded', 'false');
+      moreActionsMenu.setAttribute('aria-hidden', 'true');
+    };
+    const openMenu = () => {
+      moreActionsMenu.classList.remove('hidden');
+      moreActionsButton.setAttribute('aria-expanded', 'true');
+      moreActionsMenu.setAttribute('aria-hidden', 'false');
+    };
+    collapseMoreActionsMenu = closeMenu;
+    moreActionsButton.setAttribute('aria-expanded', 'false');
+    moreActionsMenu.setAttribute('aria-hidden', 'true');
+
+    moreActionsButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (moreActionsMenu.classList.contains('hidden')) {
+        openMenu();
+      } else {
+        closeMenu();
+      }
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!moreActionsMenu.contains(event.target) && event.target !== moreActionsButton) {
+        closeMenu();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeMenu();
+    });
+
+    moreActionsMenu.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+  }
+
+  const voiceToggleBtn = document.getElementById('voice-toggle');
+  const voiceStateLabel = voiceToggleBtn?.querySelector('.state') ?? null;
+  const settingsVoiceToggle = document.getElementById('settings-voice-enabled');
+
+  function updateMicUI() {
+    if (voiceToggleBtn) {
+      voiceToggleBtn.classList.toggle('active', micActive);
+      voiceToggleBtn.setAttribute('aria-pressed', micActive ? 'true' : 'false');
+      if (voiceStateLabel) voiceStateLabel.textContent = micActive ? 'On' : 'Off';
+    }
+    if (settingsVoiceToggle) {
+      settingsVoiceToggle.checked = micActive;
+    }
+  }
+
+  async function setMicActive(next) {
+    const desired = !!next;
+    if (desired === micActive) {
+      updateMicUI();
+      return micActive;
+    }
+
+    if (desired) {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.warn('Microphone access is not supported in this browser.');
+        micActive = false;
+        updateMicUI();
+        return micActive;
+      }
       try {
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         multiplayer.startVoice(localStream);
         micActive = true;
-        voiceButton.textContent = "Mute";
       } catch (err) {
-        console.error("Microphone access denied:", err);
+        console.error('Microphone access denied:', err);
+        micActive = false;
+        updateMicUI();
+        if (voiceStateLabel) {
+          voiceStateLabel.textContent = 'Denied';
+          setTimeout(updateMicUI, 1600);
+        }
+        return micActive;
       }
     } else {
       if (localStream) {
@@ -644,9 +707,75 @@ async function main() {
         localStream = null;
       }
       micActive = false;
-      voiceButton.textContent = "Unmute";
     }
-  });
+
+    updateMicUI();
+    return micActive;
+  }
+
+  if (voiceToggleBtn) {
+    voiceToggleBtn.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const result = await setMicActive(!micActive);
+      if (settingsVoiceToggle && settingsVoiceToggle.checked !== result) {
+        settingsVoiceToggle.checked = result;
+      }
+      if (collapseMoreActionsMenu) collapseMoreActionsMenu();
+    });
+  }
+
+  if (settingsVoiceToggle) {
+    settingsVoiceToggle.addEventListener('change', async (event) => {
+      const result = await setMicActive(event.target.checked);
+      if (settingsVoiceToggle.checked !== result) {
+        settingsVoiceToggle.checked = result;
+      }
+    });
+  }
+
+  updateMicUI();
+
+  const rainBtn = document.getElementById('rain-toggle');
+  const rainStateLabel = rainBtn?.querySelector('.state') ?? null;
+  const settingsRainToggle = document.getElementById('settings-rain-enabled');
+  let rainActive = typeof rain?.isActive === 'function' ? rain.isActive() : false;
+
+  function updateRainUI() {
+    if (rainBtn) {
+      rainBtn.classList.toggle('active', rainActive);
+      rainBtn.setAttribute('aria-pressed', rainActive ? 'true' : 'false');
+      if (rainStateLabel) rainStateLabel.textContent = rainActive ? 'On' : 'Off';
+    }
+    if (settingsRainToggle) {
+      settingsRainToggle.checked = rainActive;
+    }
+  }
+
+  function setRainActive(next) {
+    rainActive = !!next;
+    if (rain && typeof rain.setActive === 'function') {
+      rain.setActive(rainActive);
+    }
+    updateRainUI();
+  }
+
+  if (rainBtn) {
+    rainBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setRainActive(!rainActive);
+      if (collapseMoreActionsMenu) collapseMoreActionsMenu();
+    });
+  }
+
+  if (settingsRainToggle) {
+    settingsRainToggle.addEventListener('change', (event) => {
+      setRainActive(event.target.checked);
+    });
+  }
+
+  updateRainUI();
 
   const settingsBtn = document.getElementById('settings-button');
   const overlay = document.getElementById('settings-overlay');
@@ -677,6 +806,8 @@ async function main() {
   settingsBtn.addEventListener('click', () => {
     nameInput.value = playerName;
     characterSelect.value = characterModel;
+    if (settingsVoiceToggle) settingsVoiceToggle.checked = micActive;
+    if (settingsRainToggle) settingsRainToggle.checked = rainActive;
     overlay.style.display = 'flex';
   });
 

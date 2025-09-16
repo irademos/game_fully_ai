@@ -16,10 +16,21 @@
     <div class="crosshair"></div>
   </div>
   <div id="health-bar"><div id="health-fill"></div></div>
-  <div id="action-buttons">
-    <button id="voice-button" class="action-button">Unmute</button>
-    <button id="talk-button" class="action-button">🎤</button>
-    <button id="rain-toggle" class="action-button" title="Toggle Rain">🌧️</button>
+  <div id="floating-controls">
+    <button id="talk-button" class="fab-button" aria-label="Hold to talk" title="Hold to talk">🎤</button>
+    <div id="more-actions">
+      <button id="more-actions-button" class="fab-button" aria-label="More actions" title="More actions">⋯</button>
+      <div id="more-actions-menu" class="hidden" role="menu" aria-hidden="true">
+        <button id="voice-toggle" class="menu-action" role="menuitem" aria-pressed="false">
+          <span class="label">Microphone</span>
+          <span class="state">Off</span>
+        </button>
+        <button id="rain-toggle" class="menu-action" role="menuitem" aria-pressed="false">
+          <span class="label">Rain Effects</span>
+          <span class="state">Off</span>
+        </button>
+      </div>
+    </div>
   </div>
   
   <!-- Settings Button -->
@@ -33,6 +44,18 @@
       <label for="character-select">Character:</label>
       <select id="character-select"></select>
       <button id="save-settings">Save</button>
+
+      <div class="settings-section">
+        <h3>Audio &amp; Effects</h3>
+        <label class="settings-toggle" for="settings-voice-enabled">
+          <span>Microphone</span>
+          <input type="checkbox" id="settings-voice-enabled" class="toggle-input" />
+        </label>
+        <label class="settings-toggle" for="settings-rain-enabled">
+          <span>Rain Effects</span>
+          <input type="checkbox" id="settings-rain-enabled" class="toggle-input" />
+        </label>
+      </div>
 
       <button id="toggle-console">Show Console</button>
 
