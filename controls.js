@@ -11,6 +11,9 @@ const JUMP_FORCE = 5;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
+const NETWORK_SEND_INTERVAL = 80;
+const NETWORK_POSITION_EPSILON = 0.02;
+const NETWORK_ROTATION_EPSILON = 0.03;
 
 export class PlayerControls {
   constructor({ scene, camera, playerModel, renderer, multiplayer, spawnProjectile, projectiles, audioManager, initialAmmo, onAmmoChange }) {
@@ -26,6 +29,10 @@ export class PlayerControls {
     this.lastPosition = new THREE.Vector3();
     this.wasMoving = false;
     this.isMoving = false;
+    this.lastNetworkSend = 0;
+    this.pendingNetworkState = null;
+    this.lastSentAction = null;
+    this.lastSentRotation = null;
     this.spawnProjectile = spawnProjectile;
     this.projectiles = projectiles;
     this.audioManager = audioManager;
@@ -803,10 +810,37 @@ export class PlayerControls {
       if (this.controls) {
         this.controls.target.copy(newTarget);
       }
-      if (this.multiplayer && (Math.abs(this.lastPosition.x - newX) > 0.01 || Math.abs(this.lastPosition.y - displayY) > 0.01 || Math.abs(this.lastPosition.z - newZ) > 0.01 || this.isMoving !== this.wasMoving)) {
-        this.multiplayer.send({ x: newX, y: displayY, z: newZ, rotation: yawAngle, moving: this.isMoving, action: this.playerModel.userData.currentAction });
-        this.lastPosition.set(newX, displayY, newZ);
-        this.wasMoving = this.isMoving;
+      if (this.multiplayer) {
+        const action = this.playerModel.userData.currentAction;
+        const hasPositionDelta = Math.abs(this.lastPosition.x - newX) > NETWORK_POSITION_EPSILON
+          || Math.abs(this.lastPosition.y - displayY) > NETWORK_POSITION_EPSILON
+          || Math.abs(this.lastPosition.z - newZ) > NETWORK_POSITION_EPSILON;
+        const hasRotationDelta = this.lastSentRotation === null
+          || Math.abs(this.lastSentRotation - yawAngle) > NETWORK_ROTATION_EPSILON;
+        const hasActionDelta = action !== this.lastSentAction;
+        const hasMovementDelta = this.isMoving !== this.wasMoving;
+        if (hasPositionDelta || hasRotationDelta || hasActionDelta || hasMovementDelta) {
+          const roundPos = (value) => Math.round(value * 100) / 100;
+          const roundRot = (value) => Math.round(value * 1000) / 1000;
+          this.pendingNetworkState = {
+            x: roundPos(newX),
+            y: roundPos(displayY),
+            z: roundPos(newZ),
+            rotation: roundRot(yawAngle),
+            moving: this.isMoving,
+            action
+          };
+        }
+        const now = performance.now();
+        if (this.pendingNetworkState && (this.lastNetworkSend === 0 || now - this.lastNetworkSend >= NETWORK_SEND_INTERVAL)) {
+          this.multiplayer.send(this.pendingNetworkState);
+          this.lastPosition.set(newX, displayY, newZ);
+          this.wasMoving = this.isMoving;
+          this.lastSentAction = this.pendingNetworkState.action;
+          this.lastSentRotation = this.pendingNetworkState.rotation;
+          this.lastNetworkSend = now;
+          this.pendingNetworkState = null;
+        }
       }
     } else {
       this.camera.position.set(newX, newY + 1.2, newZ);
