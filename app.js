@@ -53,6 +53,14 @@ const PERF = {
 
 window.PERF = PERF;
 window.DEBUG_CONSOLE = false;
+const NET_DEFAULTS = {
+  entitySendIntervalMs: 80,
+  presenceSendIntervalMs: 300,
+  entityNumericDecimals: 2,
+  presenceNumericDecimals: 3,
+  compressNumericValues: true
+};
+window.NET_CONFIG = { ...NET_DEFAULTS, ...(window.NET_CONFIG || {}) };
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -71,10 +79,66 @@ const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
 const PRESENCE_STALE_MS = 5000;
-const PRESENCE_SEND_MS = 250;
 const PRESENCE_SWEEP_MS = 250;
 const REMOTE_LERP_ALPHA = 0.15;
 const REMOTE_TELEPORT_THRESHOLD_M = 25;
+
+const getNetConfigValue = (key) => {
+  const fallback = NET_DEFAULTS[key];
+  const value = window.NET_CONFIG?.[key];
+  if (typeof fallback === 'boolean') {
+    return typeof value === 'boolean' ? value : fallback;
+  }
+  return Number.isFinite(value) ? value : fallback;
+};
+
+const roundNumber = (value, decimals) => {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+};
+
+const compressNumericValues = (value, decimals, enabled) => {
+  if (!enabled) return value;
+  if (Array.isArray(value)) {
+    return value.map(entry => compressNumericValues(entry, decimals, enabled));
+  }
+  if (value && typeof value === 'object') {
+    const result = {};
+    Object.entries(value).forEach(([key, entry]) => {
+      result[key] = compressNumericValues(entry, decimals, enabled);
+    });
+    return result;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return roundNumber(value, decimals);
+  }
+  return value;
+};
+
+const valuesEqual = (a, b) => {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((value, index) => valuesEqual(value, b[index]));
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every(key => valuesEqual(a[key], b[key]));
+  }
+  return false;
+};
+
+const buildDeltaPayload = (next, previous) => {
+  const delta = {};
+  Object.entries(next).forEach(([key, value]) => {
+    if (!previous || !valuesEqual(value, previous[key])) {
+      delta[key] = value;
+    }
+  });
+  return Object.keys(delta).length > 0 ? delta : null;
+};
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -154,9 +218,9 @@ async function main() {
   const networkedEntities = new Map();
   const pendingEntityStates = new Map();
   const authoritativeEntityStates = new Map();
+  const lastSentEntityStates = new Map();
   let lastEntityBroadcast = 0;
   let lastControlSend = 0;
-  const ENTITY_BROADCAST_INTERVAL = 200;
   const CONTROL_SEND_INTERVAL = 140;
   const projectiles = [];
   const ammoPickups = [];
@@ -171,6 +235,7 @@ async function main() {
   const otherPlayers = {};
   window.otherPlayers = otherPlayers;
   const remotePresenceMeta = {};
+  const remotePresenceSnapshots = {};
   let lastPresenceSend = 0;
   let lastPresenceSweep = 0;
   let remoteAnimAccumulator = 0;
@@ -244,6 +309,32 @@ async function main() {
     return payload;
   }
 
+  function buildEntityStateDeltaPayload(states) {
+    const payload = {};
+    const seenIds = new Set();
+    const shouldCompress = getNetConfigValue('compressNumericValues');
+    const decimals = getNetConfigValue('entityNumericDecimals');
+    Object.entries(states).forEach(([id, entry]) => {
+      seenIds.add(id);
+      const { sourceId, ...state } = entry;
+      const compressedState = compressNumericValues(state, decimals, shouldCompress);
+      const previous = lastSentEntityStates.get(id);
+      const delta = buildDeltaPayload(compressedState, previous);
+      if (delta) {
+        payload[id] = { ...delta, sourceId };
+        lastSentEntityStates.set(id, previous ? { ...previous, ...delta } : { ...compressedState });
+      } else if (!previous) {
+        lastSentEntityStates.set(id, { ...compressedState });
+      }
+    });
+    Array.from(lastSentEntityStates.keys()).forEach(id => {
+      if (!seenIds.has(id)) {
+        lastSentEntityStates.delete(id);
+      }
+    });
+    return payload;
+  }
+
   function collectLocalControlStates() {
     const result = new Map();
     const myId = multiplayer?.getId?.();
@@ -273,14 +364,17 @@ async function main() {
       Object.entries(data.states).forEach(([id, entry]) => {
         if (!entry) return;
         const { sourceId, ...state } = entry;
+        const existing = authoritativeEntityStates.get(id);
+        const mergedState = { ...(existing?.state || {}), ...state };
+        const resolvedSourceId = sourceId ?? existing?.sourceId ?? null;
         if (sourceId && sourceId === multiplayer?.getId?.()) {
           const localEntry = networkedEntities.get(id);
           if (localEntry?.isLocallyControlled?.()) {
-            updateAuthoritativeState(id, state, sourceId);
+            updateAuthoritativeState(id, mergedState, resolvedSourceId);
             return;
           }
         }
-        updateAuthoritativeState(id, state, sourceId ?? null);
+        updateAuthoritativeState(id, mergedState, resolvedSourceId);
       });
       return;
     }
@@ -306,7 +400,12 @@ async function main() {
 
     if (data.type === 'presence') {
       const remoteId = data.id || peerId;
-      const desiredModel = data.model || DEFAULT_CHARACTER_MODEL;
+      const mergedPresence = {
+        ...(remotePresenceSnapshots[remoteId] || {}),
+        ...data
+      };
+      remotePresenceSnapshots[remoteId] = mergedPresence;
+      const desiredModel = mergedPresence.model || DEFAULT_CHARACTER_MODEL;
       const now = performance.now();
       if (!remotePresenceMeta[remoteId]) {
         remotePresenceMeta[remoteId] = { lastSeenMs: now, lastLat: null, lastLon: null };
@@ -314,19 +413,19 @@ async function main() {
         remotePresenceMeta[remoteId].lastSeenMs = now;
       }
 
-      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
-        remotePresenceMeta[remoteId].lastLat = data.lat;
-        remotePresenceMeta[remoteId].lastLon = data.lon;
+      if (Number.isFinite(mergedPresence.lat) && Number.isFinite(mergedPresence.lon)) {
+        remotePresenceMeta[remoteId].lastLat = mergedPresence.lat;
+        remotePresenceMeta[remoteId].lastLon = mergedPresence.lon;
       }
 
       const localFix = getLatestLocationFix();
       const mapOrigin = getLocalMapOrigin();
       
       // Adopt remote world anchor if we don't have one yet
-      if (!getLocalMapOrigin() && data.worldAnchor?.centerLat && data.worldAnchor?.centerLon) {
+      if (!getLocalMapOrigin() && mergedPresence.worldAnchor?.centerLat && mergedPresence.worldAnchor?.centerLon) {
         setWorldOrigin({
-          lat: data.worldAnchor.centerLat,
-          lon: data.worldAnchor.centerLon
+          lat: mergedPresence.worldAnchor.centerLat,
+          lon: mergedPresence.worldAnchor.centerLon
         });
         rebuildMapFromCache();
       }
@@ -342,8 +441,8 @@ async function main() {
         return;
       }
 
-      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
-        const dist = distanceMeters(localFix.lat, localFix.lon, data.lat, data.lon);
+      if (Number.isFinite(mergedPresence.lat) && Number.isFinite(mergedPresence.lon)) {
+        const dist = distanceMeters(localFix.lat, localFix.lon, mergedPresence.lat, mergedPresence.lon);
         remotePresenceMeta[remoteId].lastDistance = dist;
         if (dist != null && dist > PLAYER_VISIBILITY_RADIUS_M) {
           removeRemotePlayer(remoteId, 'out-of-range');
@@ -362,41 +461,41 @@ async function main() {
           }
         }
 
-        const other = new PlayerCharacter(data.name, desiredModel);
+        const other = new PlayerCharacter(mergedPresence.name, desiredModel);
         other.model.userData.hideInMapView = true;
         scene.add(other.model);
         document.body.appendChild(other.nameLabel);
         otherPlayers[remoteId] = {
           model: other.model,
           nameLabel: other.nameLabel,
-          name: data.name,
+          name: mergedPresence.name,
           health: existing?.health ?? 100,
           modelPath: desiredModel,
           targetPos: new THREE.Vector3(),
           targetQuat: new THREE.Quaternion(),
           targetRotY: 0
         };
-        logNet('spawn', remoteId, data.name);
+        logNet('spawn', remoteId, mergedPresence.name);
       }
 
       const player = otherPlayers[remoteId];
-      player.name = data.name;
+      player.name = mergedPresence.name;
       player.modelPath = desiredModel;
       if (player.nameLabel) {
-        player.nameLabel.innerText = data.name;
+        player.nameLabel.innerText = mergedPresence.name;
       }
 
       let targetX = null;
       let targetZ = null;
-      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
-        const local = geoToLocalMeters(data.lat, data.lon, mapOrigin);
+      if (Number.isFinite(mergedPresence.lat) && Number.isFinite(mergedPresence.lon)) {
+        const local = geoToLocalMeters(mergedPresence.lat, mergedPresence.lon, mapOrigin);
         if (local) {
           targetX = local.x;
           targetZ = local.z;
         }
-      } else if (Number.isFinite(data.x) && Number.isFinite(data.z)) {
-        targetX = data.x;
-        targetZ = data.z;
+      } else if (Number.isFinite(mergedPresence.x) && Number.isFinite(mergedPresence.z)) {
+        targetX = mergedPresence.x;
+        targetZ = mergedPresence.z;
       }
 
       if (targetX == null || targetZ == null) {
@@ -404,8 +503,8 @@ async function main() {
       }
 
       const terrainY = getTerrainHeight(targetX, targetZ);
-      const hasAuthoritativeY = Number.isFinite(data.y);
-      const targetY = hasAuthoritativeY ? data.y : terrainY;
+      const hasAuthoritativeY = Number.isFinite(mergedPresence.y);
+      const targetY = hasAuthoritativeY ? mergedPresence.y : terrainY;
 
       if (!player.targetPos) {
         player.targetPos = new THREE.Vector3(targetX, targetY, targetZ);
@@ -413,10 +512,10 @@ async function main() {
         player.targetPos.set(targetX, targetY, targetZ);
       }
 
-      const targetRotY = Number.isFinite(data.rotation)
-        ? data.rotation
-        : Number.isFinite(data.heading)
-          ? THREE.MathUtils.degToRad(data.heading)
+      const targetRotY = Number.isFinite(mergedPresence.rotation)
+        ? mergedPresence.rotation
+        : Number.isFinite(mergedPresence.heading)
+          ? THREE.MathUtils.degToRad(mergedPresence.heading)
           : player.model.rotation.y;
       player.targetRotY = targetRotY;
       if (!player.targetQuat) {
@@ -431,13 +530,13 @@ async function main() {
       // Sync animation state if provided
       const actions = player.model.userData.actions;
       const current = player.model.userData.currentAction;
-      if (actions && data.action && current !== data.action) {
+      if (actions && mergedPresence.action && current !== mergedPresence.action) {
         actions[current]?.fadeOut(0.2);
-        actions[data.action]?.reset().fadeIn(0.2).play();
-        player.model.userData.currentAction = data.action;
-        if (['mutantPunch','hurricaneKick','mmaKick'].includes(data.action)) {
+        actions[mergedPresence.action]?.reset().fadeIn(0.2).play();
+        player.model.userData.currentAction = mergedPresence.action;
+        if (['mutantPunch','hurricaneKick','mmaKick'].includes(mergedPresence.action)) {
           player.model.userData.attack = {
-            name: data.action,
+            name: mergedPresence.action,
             start: Date.now(),
             hasHit: false
           };
@@ -3087,12 +3186,15 @@ async function main() {
         updateAuthoritativeState(id, state, sourceId);
       });
 
-      if (now - lastEntityBroadcast >= ENTITY_BROADCAST_INTERVAL) {
-        const payload = serializeAuthoritativeStates();
-        if (Object.keys(payload).length > 0) {
+      const entityIntervalMs = getNetConfigValue('entitySendIntervalMs');
+      const payload = buildEntityStateDeltaPayload(serializeAuthoritativeStates());
+      if (Object.keys(payload).length > 0) {
+        if (now - lastEntityBroadcast >= entityIntervalMs) {
           multiplayer.send({ type: 'entityStates', states: payload });
+          lastEntityBroadcast = now;
+        } else {
+          logNet('throttle', 'entityStates', entityIntervalMs);
         }
-        lastEntityBroadcast = now;
       }
     } else if (localStates.size > 0 && now - lastControlSend >= CONTROL_SEND_INTERVAL) {
       localStates.forEach(({ state, sourceId }, id) => {
@@ -3217,10 +3319,11 @@ async function main() {
       player.model.quaternion.slerp(player.targetQuat, REMOTE_LERP_ALPHA);
     });
 
-    if (now - lastPresenceSend >= PRESENCE_SEND_MS) {
+    const presenceIntervalMs = getNetConfigValue('presenceSendIntervalMs');
+    if (now - lastPresenceSend >= presenceIntervalMs) {
       const localFix = getLatestLocationFix();
       const mapOrigin = getLocalMapOrigin();
-      const payload = {
+      const basePayload = {
         type: "presence",
         id: multiplayer.getId(),
         name: playerName,
@@ -3235,23 +3338,75 @@ async function main() {
         ? localMetersToGeo(playerModel.position.x, playerModel.position.z, mapOrigin)
         : null;
       if (derivedGeo) {
-        payload.lat = derivedGeo.lat;
-        payload.lon = derivedGeo.lon;
+        basePayload.lat = derivedGeo.lat;
+        basePayload.lon = derivedGeo.lon;
       } else if (localFix) {
-        payload.lat = localFix.lat;
-        payload.lon = localFix.lon;
+        basePayload.lat = localFix.lat;
+        basePayload.lon = localFix.lon;
       }
       if (Number.isFinite(localFix?.heading)) {
-        payload.heading = localFix.heading;
+        basePayload.heading = localFix.heading;
       }
       if (mapOrigin) {
-        payload.worldAnchor = {
+        basePayload.worldAnchor = {
           centerLat: mapOrigin.centerLat,
           centerLon: mapOrigin.centerLon
         };
       }
-      multiplayer.send(payload);
+      const shouldCompress = getNetConfigValue('compressNumericValues');
+      const decimals = getNetConfigValue('presenceNumericDecimals');
+      const compressedPayload = compressNumericValues(basePayload, decimals, shouldCompress);
+      const { type, id, ...presenceFields } = compressedPayload;
+      const deltaFields = buildDeltaPayload(presenceFields, remotePresenceSnapshots[multiplayer.getId()]);
+      if (deltaFields) {
+        remotePresenceSnapshots[multiplayer.getId()] = {
+          ...(remotePresenceSnapshots[multiplayer.getId()] || {}),
+          ...deltaFields
+        };
+      }
+      multiplayer.send({ type, id, ...(deltaFields || {}) });
       lastPresenceSend = now;
+    } else if (window.DEBUG_NET && multiplayer?.getId?.()) {
+      const localFix = getLatestLocationFix();
+      const mapOrigin = getLocalMapOrigin();
+      const pendingPayload = {
+        name: playerName,
+        model: characterModel,
+        x: playerModel.position.x,
+        y: playerModel.position.y,
+        z: playerModel.position.z,
+        rotation: playerModel.rotation.y,
+        action: playerModel.userData.currentAction
+      };
+      const derivedGeo = mapOrigin
+        ? localMetersToGeo(playerModel.position.x, playerModel.position.z, mapOrigin)
+        : null;
+      if (derivedGeo) {
+        pendingPayload.lat = derivedGeo.lat;
+        pendingPayload.lon = derivedGeo.lon;
+      } else if (localFix) {
+        pendingPayload.lat = localFix.lat;
+        pendingPayload.lon = localFix.lon;
+      }
+      if (Number.isFinite(localFix?.heading)) {
+        pendingPayload.heading = localFix.heading;
+      }
+      if (mapOrigin) {
+        pendingPayload.worldAnchor = {
+          centerLat: mapOrigin.centerLat,
+          centerLon: mapOrigin.centerLon
+        };
+      }
+      const shouldCompress = getNetConfigValue('compressNumericValues');
+      const decimals = getNetConfigValue('presenceNumericDecimals');
+      const compressedPayload = compressNumericValues(pendingPayload, decimals, shouldCompress);
+      const deltaFields = buildDeltaPayload(
+        compressedPayload,
+        remotePresenceSnapshots[multiplayer.getId()]
+      );
+      if (deltaFields) {
+        logNet('throttle', 'presence', presenceIntervalMs);
+      }
     }
 
     Object.entries(multiplayer.voiceAudios || {}).forEach(([peerId, { audio }]) => {

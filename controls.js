@@ -11,6 +11,43 @@ const JUMP_FORCE = 5;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
+const NET_DEFAULTS = {
+  movementSendIntervalMs: 80,
+  movementNumericDecimals: 2,
+  compressNumericValues: true
+};
+
+const getNetConfigValue = (key) => {
+  const fallback = NET_DEFAULTS[key];
+  const value = window.NET_CONFIG?.[key];
+  if (typeof fallback === 'boolean') {
+    return typeof value === 'boolean' ? value : fallback;
+  }
+  return Number.isFinite(value) ? value : fallback;
+};
+
+const roundNumber = (value, decimals) => {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+};
+
+const compressNumericValues = (value, decimals, enabled) => {
+  if (!enabled) return value;
+  if (Array.isArray(value)) {
+    return value.map(entry => compressNumericValues(entry, decimals, enabled));
+  }
+  if (value && typeof value === 'object') {
+    const result = {};
+    Object.entries(value).forEach(([key, entry]) => {
+      result[key] = compressNumericValues(entry, decimals, enabled);
+    });
+    return result;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return roundNumber(value, decimals);
+  }
+  return value;
+};
 
 export class PlayerControls {
   constructor({ scene, camera, playerModel, renderer, multiplayer, spawnProjectile, projectiles, audioManager, initialAmmo, onAmmoChange }) {
@@ -26,6 +63,7 @@ export class PlayerControls {
     this.lastPosition = new THREE.Vector3();
     this.wasMoving = false;
     this.isMoving = false;
+    this.lastMovementSendMs = 0;
     this.spawnProjectile = spawnProjectile;
     this.projectiles = projectiles;
     this.audioManager = audioManager;
@@ -804,9 +842,27 @@ export class PlayerControls {
         this.controls.target.copy(newTarget);
       }
       if (this.multiplayer && (Math.abs(this.lastPosition.x - newX) > 0.01 || Math.abs(this.lastPosition.y - displayY) > 0.01 || Math.abs(this.lastPosition.z - newZ) > 0.01 || this.isMoving !== this.wasMoving)) {
-        this.multiplayer.send({ x: newX, y: displayY, z: newZ, rotation: yawAngle, moving: this.isMoving, action: this.playerModel.userData.currentAction });
-        this.lastPosition.set(newX, displayY, newZ);
-        this.wasMoving = this.isMoving;
+        const now = performance.now();
+        const movementIntervalMs = getNetConfigValue('movementSendIntervalMs');
+        if (now - this.lastMovementSendMs >= movementIntervalMs) {
+          const payload = {
+            x: newX,
+            y: displayY,
+            z: newZ,
+            rotation: yawAngle,
+            moving: this.isMoving,
+            action: this.playerModel.userData.currentAction
+          };
+          const shouldCompress = getNetConfigValue('compressNumericValues');
+          const decimals = getNetConfigValue('movementNumericDecimals');
+          const compressedPayload = compressNumericValues(payload, decimals, shouldCompress);
+          this.multiplayer.send(compressedPayload);
+          this.lastMovementSendMs = now;
+          this.lastPosition.set(newX, displayY, newZ);
+          this.wasMoving = this.isMoving;
+        } else if (window.DEBUG_NET) {
+          console.log('[net]', 'throttle', 'movement', movementIntervalMs);
+        }
       }
     } else {
       this.camera.position.set(newX, newY + 1.2, newZ);
