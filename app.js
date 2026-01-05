@@ -310,7 +310,9 @@ async function main() {
         rebuildMapFromCache();
       }
 
-      if (!localFix || !mapOrigin) {
+      const hasLocalPosition = Number.isFinite(data.x) && Number.isFinite(data.z);
+      const hasGeoFix = Boolean(localFix && mapOrigin);
+      if (!hasGeoFix && !hasLocalPosition) {
         const existing = otherPlayers[remoteId];
         if (existing?.model) {
           existing.model.visible = false;
@@ -321,7 +323,7 @@ async function main() {
         return;
       }
 
-      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
+      if (hasGeoFix && Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
         const dist = distanceMeters(localFix.lat, localFix.lon, data.lat, data.lon);
         remotePresenceMeta[remoteId].lastDistance = dist;
         if (dist != null && dist > PLAYER_VISIBILITY_RADIUS_M) {
@@ -367,7 +369,7 @@ async function main() {
 
       let targetX = null;
       let targetZ = null;
-      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
+      if (hasGeoFix && Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
         const local = geoToLocalMeters(data.lat, data.lon, mapOrigin);
         if (local) {
           targetX = local.x;
@@ -3002,10 +3004,7 @@ async function main() {
         const player = otherPlayers[remoteId];
         if (!localFix || !mapOrigin) {
           if (player?.model) {
-            player.model.visible = false;
-          }
-          if (player?.nameLabel) {
-            player.nameLabel.style.display = 'none';
+            player.model.visible = true;
           }
           return;
         }
