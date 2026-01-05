@@ -2776,6 +2776,11 @@ async function main() {
       if (!generalError) return networkError;
       return (networkError.timestamp || 0) >= (generalError.timestamp || 0) ? networkError : generalError;
     },
+    getLastNetworkTest: () => multiplayer?.lastNetworkTestResult,
+    getNetworkLoggingEnabled: () => multiplayer?.diagnostics?.enabled,
+    isNetworkTestRunning: () => multiplayer?.networkTestInProgress,
+    runNetworkTest: () => multiplayer?.runNetworkTest?.(),
+    setNetworkLoggingEnabled: (enabled) => multiplayer?.setDiagnosticsEnabled?.(enabled),
     getAppVersion: () => import.meta.env?.VITE_APP_VERSION || import.meta.env?.VITE_GIT_COMMIT || 'unknown',
     resetWorldOrigin: () => {
       resetWorldOrigin();

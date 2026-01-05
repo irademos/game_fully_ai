@@ -21,6 +21,19 @@ export class Multiplayer {
     this.lastPingMs = null;
     this.lastPingAt = null;
     this.lastError = null;
+    this.lastNetworkTestResult = null;
+    this.networkTestInProgress = false;
+    this.activeNetworkTests = {};
+    this.diagnostics = {
+      enabled: false,
+      intervalId: null,
+      logIntervalMs: 10000,
+      sentMessages: 0,
+      sentBytes: 0,
+      receivedMessages: 0,
+      receivedBytes: 0,
+      lastSnapshot: null
+    };
     
     this.initPeer(); // Start async setup
   }
@@ -181,8 +194,9 @@ export class Multiplayer {
     conn.on('open', () => {
       this.connections[conn.peer] = conn;
       conn.on('data', data => {
+        this.recordReceived(data);
         if (data?.type === 'ping') {
-          conn.send({ type: 'pong', ts: data.ts || Date.now() });
+          this.sendWithMetrics(conn, { type: 'pong', ts: data.ts || Date.now() });
           return;
         }
         if (data?.type === 'pong') {
@@ -193,6 +207,20 @@ export class Multiplayer {
             this.lastPingAt = Date.now();
             this.onPingUpdate?.(rtt);
           }
+          return;
+        }
+        if (data?.type === 'networkTest') {
+          this.sendWithMetrics(conn, {
+            type: 'networkTestAck',
+            testId: data.testId,
+            seq: data.seq,
+            ts: data.ts,
+            receivedAt: Date.now()
+          });
+          return;
+        }
+        if (data?.type === 'networkTestAck') {
+          this.handleNetworkTestAck(conn.peer, data);
           return;
         }
         this.onPeerData(conn.peer, data);
@@ -290,9 +318,9 @@ export class Multiplayer {
     Object.values(this.connections).forEach(conn => {
       if (conn && typeof conn.send === 'function') {
         if (conn.open) {
-          conn.send(data);
+          this.sendWithMetrics(conn, data);
         } else if (typeof conn.once === 'function') {
-          conn.once('open', () => conn.send(data));
+          conn.once('open', () => this.sendWithMetrics(conn, data));
         } else {
           console.warn("Invalid connection object", conn);
         }
@@ -313,11 +341,11 @@ export class Multiplayer {
     const existing = this.connections[peerId];
     if (existing && typeof existing.send === 'function') {
       if (existing.open) {
-        existing.send(data);
+        this.sendWithMetrics(existing, data);
         return;
       }
       if (typeof existing.once === 'function') {
-        existing.once('open', () => existing.send(data));
+        existing.once('open', () => this.sendWithMetrics(existing, data));
         return;
       }
     }
@@ -326,7 +354,7 @@ export class Multiplayer {
       const conn = this.peer.connect(peerId);
       this.setupConnection(conn);
       if (typeof conn.once === 'function') {
-        conn.once('open', () => conn.send(data));
+        conn.once('open', () => this.sendWithMetrics(conn, data));
       }
     } catch (err) {
       console.warn(`Failed to send direct message to ${peerId}:`, err);
@@ -354,7 +382,7 @@ export class Multiplayer {
       if (!conn.open) return;
       const ts = Date.now();
       this.pendingPings[conn.peer] = ts;
-      conn.send({ type: 'ping', ts });
+      this.sendWithMetrics(conn, { type: 'ping', ts });
     }, 8000);
     conn.pingIntervalId = intervalId;
   }
@@ -390,5 +418,218 @@ export class Multiplayer {
         this.recordError(err);
       }
     });
+  }
+
+  setDiagnosticsEnabled(enabled) {
+    this.diagnostics.enabled = Boolean(enabled);
+    if (this.diagnostics.enabled) {
+      this.startDiagnosticsLoop();
+      this.logDiagnostics('Network logging enabled.');
+    } else {
+      this.stopDiagnosticsLoop();
+      this.logDiagnostics('Network logging disabled.');
+    }
+  }
+
+  startDiagnosticsLoop() {
+    if (!this.diagnostics.enabled) return;
+    if (this.diagnostics.intervalId) {
+      clearInterval(this.diagnostics.intervalId);
+    }
+    this.diagnostics.lastSnapshot = null;
+    this.diagnostics.intervalId = setInterval(() => {
+      this.logDiagnosticsSummary();
+    }, this.diagnostics.logIntervalMs);
+  }
+
+  stopDiagnosticsLoop() {
+    if (this.diagnostics.intervalId) {
+      clearInterval(this.diagnostics.intervalId);
+      this.diagnostics.intervalId = null;
+    }
+  }
+
+  logDiagnostics(message) {
+    if (!this.diagnostics.enabled) return;
+    console.log(`📡 Multiplayer diagnostics: ${message}`);
+  }
+
+  logDiagnosticsSummary() {
+    if (!this.diagnostics.enabled) return;
+    const snapshot = {
+      sentMessages: this.diagnostics.sentMessages,
+      sentBytes: this.diagnostics.sentBytes,
+      receivedMessages: this.diagnostics.receivedMessages,
+      receivedBytes: this.diagnostics.receivedBytes
+    };
+    const last = this.diagnostics.lastSnapshot;
+    const delta = last
+      ? {
+          sentMessages: snapshot.sentMessages - last.sentMessages,
+          sentBytes: snapshot.sentBytes - last.sentBytes,
+          receivedMessages: snapshot.receivedMessages - last.receivedMessages,
+          receivedBytes: snapshot.receivedBytes - last.receivedBytes
+        }
+      : snapshot;
+    this.diagnostics.lastSnapshot = snapshot;
+    console.log(
+      `📡 Network traffic (last ${this.diagnostics.logIntervalMs / 1000}s): ` +
+        `${delta.sentMessages} msgs/${this.formatBytes(delta.sentBytes)} sent, ` +
+        `${delta.receivedMessages} msgs/${this.formatBytes(delta.receivedBytes)} received.`
+    );
+  }
+
+  sendWithMetrics(conn, data) {
+    if (!conn || typeof conn.send !== 'function') return;
+    conn.send(data);
+    this.recordSent(data);
+  }
+
+  recordSent(data) {
+    const size = this.estimatePayloadSize(data);
+    this.diagnostics.sentMessages += 1;
+    this.diagnostics.sentBytes += size;
+  }
+
+  recordReceived(data) {
+    const size = this.estimatePayloadSize(data);
+    this.diagnostics.receivedMessages += 1;
+    this.diagnostics.receivedBytes += size;
+  }
+
+  estimatePayloadSize(data) {
+    if (data == null) return 0;
+    try {
+      return JSON.stringify(data).length;
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  formatBytes(bytes) {
+    if (!Number.isFinite(bytes)) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  runNetworkTest({ durationMs = 8000, intervalMs = 250, payloadSize = 512 } = {}) {
+    if (this.networkTestInProgress) {
+      console.warn('Network test already running.');
+      return null;
+    }
+    const peers = Object.keys(this.connections || {}).filter(peerId => peerId !== this.id);
+    if (!peers.length) {
+      console.warn('Network test skipped: no connected peers.');
+      return null;
+    }
+
+    const testId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    const payload = 'x'.repeat(Math.max(0, payloadSize));
+    const startedAt = Date.now();
+    const testState = {
+      id: testId,
+      startedAt,
+      durationMs,
+      intervalMs,
+      payloadSize,
+      peers: {},
+      timers: []
+    };
+
+    peers.forEach(peerId => {
+      testState.peers[peerId] = {
+        sent: 0,
+        received: 0,
+        rtts: []
+      };
+    });
+
+    this.activeNetworkTests[testId] = testState;
+    this.networkTestInProgress = true;
+    console.log(`📡 Starting network test ${testId} (${durationMs}ms, ${payloadSize}B payload).`);
+
+    const sendPacket = (peerId) => {
+      const conn = this.connections?.[peerId];
+      if (!conn || !conn.open) return;
+      const peerState = testState.peers[peerId];
+      if (!peerState) return;
+      const seq = peerState.sent + 1;
+      peerState.sent = seq;
+      const ts = Date.now();
+      this.sendWithMetrics(conn, {
+        type: 'networkTest',
+        testId,
+        seq,
+        ts,
+        payload
+      });
+    };
+
+    peers.forEach(peerId => {
+      sendPacket(peerId);
+      const intervalId = setInterval(() => sendPacket(peerId), intervalMs);
+      testState.timers.push(intervalId);
+    });
+
+    setTimeout(() => {
+      testState.timers.forEach(id => clearInterval(id));
+      testState.timers = [];
+      setTimeout(() => {
+        this.finalizeNetworkTest(testId);
+      }, Math.min(1000, intervalMs * 4));
+    }, durationMs);
+
+    return testId;
+  }
+
+  handleNetworkTestAck(peerId, data) {
+    const testId = data?.testId;
+    if (!testId || !this.activeNetworkTests[testId]) return;
+    const testState = this.activeNetworkTests[testId];
+    const peerState = testState.peers?.[peerId];
+    if (!peerState) return;
+    const ts = data.ts || Date.now();
+    const rtt = Date.now() - ts;
+    peerState.received += 1;
+    peerState.rtts.push(rtt);
+  }
+
+  finalizeNetworkTest(testId) {
+    const testState = this.activeNetworkTests[testId];
+    if (!testState) return;
+    delete this.activeNetworkTests[testId];
+    this.networkTestInProgress = false;
+
+    const summary = {
+      id: testId,
+      completedAt: Date.now(),
+      durationMs: testState.durationMs,
+      intervalMs: testState.intervalMs,
+      payloadSize: testState.payloadSize,
+      peers: {}
+    };
+
+    Object.entries(testState.peers).forEach(([peerId, peerState]) => {
+      const rtts = peerState.rtts;
+      const rttMin = rtts.length ? Math.min(...rtts) : null;
+      const rttMax = rtts.length ? Math.max(...rtts) : null;
+      const rttAvg = rtts.length
+        ? Math.round(rtts.reduce((sum, value) => sum + value, 0) / rtts.length)
+        : null;
+      const loss = peerState.sent ? Math.max(0, peerState.sent - peerState.received) : 0;
+      summary.peers[peerId] = {
+        sent: peerState.sent,
+        received: peerState.received,
+        loss,
+        lossRate: peerState.sent ? loss / peerState.sent : null,
+        rttMin,
+        rttMax,
+        rttAvg
+      };
+    });
+
+    this.lastNetworkTestResult = summary;
+    console.log('📡 Network test complete:', summary);
   }
 }

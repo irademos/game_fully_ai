@@ -73,6 +73,22 @@ function formatMeters(value) {
   return value.toFixed(2);
 }
 
+function formatNetworkTestSummary(testResult) {
+  if (!testResult) return 'Not run';
+  const peerEntries = Object.values(testResult.peers || {});
+  if (!peerEntries.length) return 'No peers tested';
+  const received = peerEntries.reduce((sum, entry) => sum + (entry.received || 0), 0);
+  const sent = peerEntries.reduce((sum, entry) => sum + (entry.sent || 0), 0);
+  const lossRate = sent ? Math.round(((sent - received) / sent) * 100) : 0;
+  const avgRtts = peerEntries.map(entry => entry.rttAvg).filter(value => Number.isFinite(value));
+  const avgRtt = avgRtts.length
+    ? Math.round(avgRtts.reduce((sum, value) => sum + value, 0) / avgRtts.length)
+    : null;
+  const timestamp = formatTimestamp(testResult.completedAt);
+  const rttText = avgRtt != null ? `${avgRtt} ms avg RTT` : 'No RTT data';
+  return `${timestamp} • ${rttText} • ${lossRate}% loss`;
+}
+
 function formatStatValue(key, value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—';
   if (PERCENT_STATS.has(key)) {
@@ -201,12 +217,47 @@ function buildMultiplayerPanel() {
   errorText.dataset.field = 'connection-error';
   errorText.textContent = 'None';
 
-  panelEl.append(statusRow, pingRow, playersTitle, playersList, reconnectButton, errorTitle, errorText);
+  const diagnosticsTitle = createElement('h3', 'settings-section-title', 'Network Diagnostics');
+  const loggingRow = createElement('div', 'settings-row');
+  const loggingLabel = createElement('label', 'settings-label', 'Enable logging');
+  loggingLabel.setAttribute('for', 'network-logging-toggle');
+  const loggingToggle = createElement('input', 'settings-checkbox');
+  loggingToggle.type = 'checkbox';
+  loggingToggle.id = 'network-logging-toggle';
+  loggingRow.append(loggingLabel, loggingToggle);
+
+  const networkTestRow = createElement('div', 'settings-row');
+  networkTestRow.innerHTML = '<span>Last network test</span><span data-field="network-test">Not run</span>';
+
+  const networkTestButton = createElement('button', 'settings-button', 'Run Network Test');
+  networkTestButton.type = 'button';
+  networkTestButton.dataset.action = 'network-test';
+
+  const networkNote = createElement('div', 'settings-muted');
+  networkNote.textContent = 'Runs a short RTT/loss test per peer and logs detailed stats to the console.';
+
+  panelEl.append(
+    statusRow,
+    pingRow,
+    playersTitle,
+    playersList,
+    reconnectButton,
+    errorTitle,
+    errorText,
+    diagnosticsTitle,
+    loggingRow,
+    networkTestRow,
+    networkTestButton,
+    networkNote
+  );
 
   elements.connectionStatus = statusRow.querySelector('[data-field="connection-status"]');
   elements.ping = pingRow.querySelector('[data-field="ping"]');
   elements.playersList = playersList;
   elements.connectionError = errorText;
+  elements.networkLoggingToggle = loggingToggle;
+  elements.networkTestSummary = networkTestRow.querySelector('[data-field="network-test"]');
+  elements.networkTestButton = networkTestButton;
 
   return panelEl;
 }
@@ -549,6 +600,8 @@ function handleAction(target) {
     if (direction === 'east') delta.eastMeters = stepMeters;
     if (direction === 'west') delta.eastMeters = -stepMeters;
     context.location?.stepDebugLocation?.(delta);
+  } else if (action === 'network-test') {
+    context.appState?.runNetworkTest?.();
   }
 }
 
@@ -688,6 +741,12 @@ function bindEvents() {
     elements.debugLocationFields.accuracy.addEventListener('change', (event) => {
       const value = parseFloat(event.target.value);
       context.location?.setDebugAccuracy?.(value);
+    });
+  }
+
+  if (elements.networkLoggingToggle) {
+    elements.networkLoggingToggle.addEventListener('change', (event) => {
+      context.appState?.setNetworkLoggingEnabled?.(event.target.checked);
     });
   }
 
@@ -921,6 +980,19 @@ export function updateUI() {
     elements.connectionError.textContent = lastError
       ? `${lastError.message} (${formatTimestamp(lastError.timestamp)})`
       : 'None';
+  }
+  if (elements.networkLoggingToggle && context.appState?.getNetworkLoggingEnabled) {
+    const enabled = Boolean(context.appState.getNetworkLoggingEnabled());
+    elements.networkLoggingToggle.checked = enabled;
+  }
+  if (elements.networkTestSummary && context.appState?.getLastNetworkTest) {
+    const testResult = context.appState.getLastNetworkTest();
+    elements.networkTestSummary.textContent = formatNetworkTestSummary(testResult);
+  }
+  if (elements.networkTestButton && context.appState?.isNetworkTestRunning) {
+    const isRunning = Boolean(context.appState.isNetworkTestRunning());
+    elements.networkTestButton.disabled = isRunning;
+    elements.networkTestButton.textContent = isRunning ? 'Running Test…' : 'Run Network Test';
   }
 
   if (elements.locationFields && context.location?.getState) {
