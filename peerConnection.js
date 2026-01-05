@@ -21,6 +21,10 @@ export class Multiplayer {
     this.lastPingMs = null;
     this.lastPingAt = null;
     this.lastError = null;
+    this.sendQueue = [];
+    this.incomingQueue = [];
+    this.flushScheduled = false;
+    this.incomingFlushScheduled = false;
     
     this.initPeer(); // Start async setup
   }
@@ -195,7 +199,7 @@ export class Multiplayer {
           }
           return;
         }
-        this.onPeerData(conn.peer, data);
+        this.enqueueIncoming(conn.peer, data);
       });
   
       // Attempt to access the internal peer connection
@@ -290,9 +294,9 @@ export class Multiplayer {
     Object.values(this.connections).forEach(conn => {
       if (conn && typeof conn.send === 'function') {
         if (conn.open) {
-          conn.send(data);
+          this.enqueueSend(conn, data);
         } else if (typeof conn.once === 'function') {
-          conn.once('open', () => conn.send(data));
+          conn.once('open', () => this.enqueueSend(conn, data));
         } else {
           console.warn("Invalid connection object", conn);
         }
@@ -313,11 +317,11 @@ export class Multiplayer {
     const existing = this.connections[peerId];
     if (existing && typeof existing.send === 'function') {
       if (existing.open) {
-        existing.send(data);
+        this.enqueueSend(existing, data);
         return;
       }
       if (typeof existing.once === 'function') {
-        existing.once('open', () => existing.send(data));
+        existing.once('open', () => this.enqueueSend(existing, data));
         return;
       }
     }
@@ -326,10 +330,85 @@ export class Multiplayer {
       const conn = this.peer.connect(peerId);
       this.setupConnection(conn);
       if (typeof conn.once === 'function') {
-        conn.once('open', () => conn.send(data));
+        conn.once('open', () => this.enqueueSend(conn, data));
       }
     } catch (err) {
       console.warn(`Failed to send direct message to ${peerId}:`, err);
+    }
+  }
+
+  enqueueSend(conn, data) {
+    this.sendQueue.push({ conn, data });
+    if (this.sendQueue.length > 500) {
+      this.sendQueue.shift();
+    }
+    this.scheduleFlush();
+  }
+
+  scheduleFlush() {
+    if (this.flushScheduled) return;
+    this.flushScheduled = true;
+    const flush = deadline => {
+      this.flushScheduled = false;
+      this.flushSendQueue(deadline);
+    };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(flush, { timeout: 100 });
+    } else {
+      setTimeout(() => flush(), 0);
+    }
+  }
+
+  flushSendQueue(deadline) {
+    while (this.sendQueue.length) {
+      if (deadline?.timeRemaining && deadline.timeRemaining() < 5) {
+        this.scheduleFlush();
+        return;
+      }
+      const { conn, data } = this.sendQueue.shift();
+      if (!conn || !conn.open || typeof conn.send !== 'function') continue;
+      try {
+        conn.send(data);
+      } catch (err) {
+        console.warn('Failed to send queued data:', err);
+      }
+    }
+  }
+
+  enqueueIncoming(peerId, data) {
+    this.incomingQueue.push({ peerId, data });
+    if (this.incomingQueue.length > 500) {
+      this.incomingQueue.shift();
+    }
+    this.scheduleIncomingFlush();
+  }
+
+  scheduleIncomingFlush() {
+    if (this.incomingFlushScheduled) return;
+    this.incomingFlushScheduled = true;
+    const flush = deadline => {
+      this.incomingFlushScheduled = false;
+      this.flushIncomingQueue(deadline);
+    };
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(flush, { timeout: 100 });
+    } else {
+      setTimeout(() => flush(), 0);
+    }
+  }
+
+  flushIncomingQueue(deadline) {
+    while (this.incomingQueue.length) {
+      if (deadline?.timeRemaining && deadline.timeRemaining() < 5) {
+        this.scheduleIncomingFlush();
+        return;
+      }
+      const { peerId, data } = this.incomingQueue.shift();
+      try {
+        this.onPeerData(peerId, data);
+      } catch (err) {
+        console.warn('Incoming multiplayer handler failed:', err);
+      }
     }
   }
 
