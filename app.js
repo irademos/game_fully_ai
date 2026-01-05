@@ -238,6 +238,52 @@ async function main() {
     return result;
   }
 
+  function applyRemotePlayerState(remoteId, data) {
+    const player = otherPlayers[remoteId];
+    if (!player?.model) return;
+    const targetX = Number.isFinite(data.x) ? data.x : null;
+    const targetZ = Number.isFinite(data.z) ? data.z : null;
+    if (targetX == null || targetZ == null) return;
+
+    const terrainY = getTerrainHeight(targetX, targetZ);
+    const hasAuthoritativeY = Number.isFinite(data.y);
+    const targetY = hasAuthoritativeY ? data.y : terrainY;
+
+    if (!player.targetPos) {
+      player.targetPos = new THREE.Vector3(targetX, targetY, targetZ);
+    } else {
+      player.targetPos.set(targetX, targetY, targetZ);
+    }
+
+    const targetRotY = Number.isFinite(data.rotation)
+      ? data.rotation
+      : player.model.rotation.y;
+    player.targetRotY = targetRotY;
+    if (!player.targetQuat) {
+      player.targetQuat = new THREE.Quaternion();
+    }
+    player.targetQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetRotY);
+
+    if (!player.model.visible) {
+      player.model.visible = true;
+    }
+
+    const actions = player.model.userData.actions;
+    const current = player.model.userData.currentAction;
+    if (actions && data.action && current !== data.action) {
+      actions[current]?.fadeOut(0.2);
+      actions[data.action]?.reset().fadeIn(0.2).play();
+      player.model.userData.currentAction = data.action;
+      if (['mutantPunch','hurricaneKick','mmaKick'].includes(data.action)) {
+        player.model.userData.attack = {
+          name: data.action,
+          start: Date.now(),
+          hasHit: false
+        };
+      }
+    }
+  }
+
   function handleIncomingData(peerId, data) {
     // console.log('📡 Incoming data:', data);
 
@@ -280,6 +326,12 @@ async function main() {
       if (Object.keys(snapshot).length > 0) {
         multiplayer.sendTo(data.requesterId, { type: 'entitySnapshot', states: snapshot });
       }
+      return;
+    }
+
+    if (data.type === 'playerState') {
+      const remoteId = data.id || peerId;
+      applyRemotePlayerState(remoteId, data);
       return;
     }
 
@@ -388,42 +440,15 @@ async function main() {
       const hasAuthoritativeY = Number.isFinite(data.y);
       const targetY = hasAuthoritativeY ? data.y : terrainY;
 
-      if (!player.targetPos) {
-        player.targetPos = new THREE.Vector3(targetX, targetY, targetZ);
-      } else {
-        player.targetPos.set(targetX, targetY, targetZ);
+      data.x = targetX;
+      data.z = targetZ;
+      if (!hasAuthoritativeY) {
+        data.y = targetY;
       }
-
-      const targetRotY = Number.isFinite(data.rotation)
-        ? data.rotation
-        : Number.isFinite(data.heading)
-          ? THREE.MathUtils.degToRad(data.heading)
-          : player.model.rotation.y;
-      player.targetRotY = targetRotY;
-      if (!player.targetQuat) {
-        player.targetQuat = new THREE.Quaternion();
+      if (Number.isFinite(data.heading) && !Number.isFinite(data.rotation)) {
+        data.rotation = THREE.MathUtils.degToRad(data.heading);
       }
-      player.targetQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetRotY);
-
-      if (!player.model.visible) {
-        player.model.visible = true;
-      }
-
-      // Sync animation state if provided
-      const actions = player.model.userData.actions;
-      const current = player.model.userData.currentAction;
-      if (actions && data.action && current !== data.action) {
-        actions[current]?.fadeOut(0.2);
-        actions[data.action]?.reset().fadeIn(0.2).play();
-        player.model.userData.currentAction = data.action;
-        if (['mutantPunch','hurricaneKick','mmaKick'].includes(data.action)) {
-          player.model.userData.attack = {
-            name: data.action,
-            start: Date.now(),
-            hasHit: false
-          };
-        }
-      }
+      applyRemotePlayerState(remoteId, data);
 
       return;
     }

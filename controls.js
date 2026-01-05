@@ -823,6 +823,7 @@ export class PlayerControls {
           const roundPos = (value) => Math.round(value * 100) / 100;
           const roundRot = (value) => Math.round(value * 1000) / 1000;
           this.pendingNetworkState = {
+            type: 'playerState',
             x: roundPos(newX),
             y: roundPos(displayY),
             z: roundPos(newZ),
