@@ -73,6 +73,16 @@ function formatMeters(value) {
   return value.toFixed(2);
 }
 
+function formatRttSummary(rtt) {
+  if (!rtt || typeof rtt.min !== 'number' || typeof rtt.avg !== 'number' || typeof rtt.max !== 'number') return '—';
+  return `${Math.round(rtt.min)} / ${Math.round(rtt.avg)} / ${Math.round(rtt.max)} ms`;
+}
+
+function formatLossRate(lossRate) {
+  if (typeof lossRate !== 'number' || Number.isNaN(lossRate)) return '—';
+  return `${(lossRate * 100).toFixed(1)}%`;
+}
+
 function formatStatValue(key, value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—';
   if (PERCENT_STATS.has(key)) {
@@ -192,6 +202,12 @@ function buildMultiplayerPanel() {
   const playersList = createElement('ul', 'settings-list');
   playersList.dataset.field = 'players';
 
+  const liveStatsDetails = document.createElement('details');
+  liveStatsDetails.className = 'settings-details';
+  const liveStatsSummary = createElement('summary', 'settings-details-summary', 'Live Stats');
+  const liveStatsList = createElement('div', 'settings-live-list');
+  liveStatsDetails.append(liveStatsSummary, liveStatsList);
+
   const reconnectButton = createElement('button', 'settings-button', 'Reconnect');
   reconnectButton.type = 'button';
   reconnectButton.dataset.action = 'reconnect';
@@ -201,11 +217,12 @@ function buildMultiplayerPanel() {
   errorText.dataset.field = 'connection-error';
   errorText.textContent = 'None';
 
-  panelEl.append(statusRow, pingRow, playersTitle, playersList, reconnectButton, errorTitle, errorText);
+  panelEl.append(statusRow, pingRow, playersTitle, playersList, liveStatsDetails, reconnectButton, errorTitle, errorText);
 
   elements.connectionStatus = statusRow.querySelector('[data-field="connection-status"]');
   elements.ping = pingRow.querySelector('[data-field="ping"]');
   elements.playersList = playersList;
+  elements.liveStatsList = liveStatsList;
   elements.connectionError = errorText;
 
   return panelEl;
@@ -913,6 +930,30 @@ export function updateUI() {
         const distance = player.distance != null ? ` • ${formatDistance(player.distance)}` : '';
         item.textContent = `${player.name} (${player.id})${distance}`;
         elements.playersList.appendChild(item);
+      });
+    }
+  }
+  if (elements.liveStatsList) {
+    const stats = context.appState?.getNetworkStats?.() ?? {};
+    const players = context.appState?.getConnectedPlayers?.() ?? [];
+    const nameById = new Map(players.map(player => [player.id, player.name]));
+    const peerIds = Object.keys(stats);
+    elements.liveStatsList.innerHTML = '';
+    if (!peerIds.length) {
+      const empty = createElement('div', 'settings-muted', 'No recent samples.');
+      elements.liveStatsList.appendChild(empty);
+    } else {
+      peerIds.forEach(peerId => {
+        const entry = stats[peerId] || {};
+        const item = createElement('div', 'settings-live-item');
+        const name = nameById.get(peerId) || `Player ${peerId.slice(0, 4)}`;
+        const label = createElement('div', 'settings-live-label', name);
+        const metrics = createElement('div', 'settings-live-metrics');
+        const rtt = createElement('div', 'settings-live-metric', `RTT min/avg/max: ${formatRttSummary(entry.rtt)}`);
+        const loss = createElement('div', 'settings-live-metric', `Loss: ${formatLossRate(entry.lossRate)}`);
+        metrics.append(rtt, loss);
+        item.append(label, metrics);
+        elements.liveStatsList.appendChild(item);
       });
     }
   }

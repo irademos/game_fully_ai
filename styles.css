@@ -712,6 +712,53 @@ body {
   color: #666;
 }
 
+.settings-details {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #e6e6e6;
+  background: #fafafa;
+}
+
+.settings-details-summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-live-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.settings-live-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e6e6e6;
+  background: #fff;
+  font-size: 11px;
+}
+
+.settings-live-label {
+  font-weight: 600;
+}
+
+.settings-live-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #333;
+}
+
+.settings-live-metric {
+  font-variant-numeric: tabular-nums;
+}
+
 .inventory-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));

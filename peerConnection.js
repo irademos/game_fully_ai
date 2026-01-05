@@ -21,6 +21,8 @@ export class Multiplayer {
     this.lastPingMs = null;
     this.lastPingAt = null;
     this.lastError = null;
+    this.networkSampleSize = 20;
+    this.peerNetworkSamples = new Map();
     
     this.initPeer(); // Start async setup
   }
@@ -195,6 +197,22 @@ export class Multiplayer {
           }
           return;
         }
+        if (data?.type === 'networkTestAck') {
+          const sentAt = Number.isFinite(data.sentAt) ? data.sentAt : data.ts;
+          const rtt = Number.isFinite(data.rtt) ? data.rtt : (Number.isFinite(sentAt) ? Date.now() - sentAt : null);
+          const lossCount = Number.isFinite(data.lossCount) ? data.lossCount : null;
+          const totalCount = Number.isFinite(data.sentCount)
+            ? data.sentCount
+            : Number.isFinite(data.totalCount)
+              ? data.totalCount
+              : null;
+          this.recordNetworkSample(conn.peer, {
+            rtt,
+            lossCount,
+            totalCount
+          });
+          return;
+        }
         this.onPeerData(conn.peer, data);
       });
   
@@ -231,6 +249,7 @@ export class Multiplayer {
     conn.on('close', () => {
       this.stopPingLoop(conn.peer);
       delete this.connections[conn.peer];
+      this.peerNetworkSamples.delete(conn.peer);
     });
   
     conn.on('error', err => {
@@ -368,6 +387,67 @@ export class Multiplayer {
     if (this.pendingPings?.[peerId]) {
       delete this.pendingPings[peerId];
     }
+  }
+
+  recordNetworkSample(peerId, { rtt, lossCount, totalCount }) {
+    if (!peerId || !this.networkSampleSize) return;
+    let entry = this.peerNetworkSamples.get(peerId);
+    if (!entry) {
+      entry = { rtts: [], losses: [] };
+      this.peerNetworkSamples.set(peerId, entry);
+    }
+    if (Number.isFinite(rtt)) {
+      entry.rtts.push(rtt);
+      if (entry.rtts.length > this.networkSampleSize) {
+        entry.rtts.splice(0, entry.rtts.length - this.networkSampleSize);
+      }
+    }
+    if (Number.isFinite(lossCount) || Number.isFinite(totalCount)) {
+      entry.losses.push({
+        lost: Number.isFinite(lossCount) ? lossCount : 0,
+        total: Number.isFinite(totalCount) ? totalCount : null
+      });
+      if (entry.losses.length > this.networkSampleSize) {
+        entry.losses.splice(0, entry.losses.length - this.networkSampleSize);
+      }
+    }
+  }
+
+  getNetworkStats() {
+    const result = {};
+    this.peerNetworkSamples.forEach((entry, peerId) => {
+      const { rtts, losses } = entry;
+      let rttStats = null;
+      if (rtts.length) {
+        const min = Math.min(...rtts);
+        const max = Math.max(...rtts);
+        const avg = rtts.reduce((sum, value) => sum + value, 0) / rtts.length;
+        rttStats = { min, avg, max, samples: rtts.length };
+      }
+      let lossRate = null;
+      if (losses.length) {
+        let totalLost = 0;
+        let totalSent = 0;
+        let hasTotals = false;
+        losses.forEach(sample => {
+          if (Number.isFinite(sample.lost)) {
+            totalLost += sample.lost;
+          }
+          if (Number.isFinite(sample.total)) {
+            totalSent += sample.total;
+            hasTotals = true;
+          }
+        });
+        if (hasTotals && totalSent > 0) {
+          lossRate = totalLost / totalSent;
+        }
+      }
+      result[peerId] = {
+        rtt: rttStats,
+        lossRate
+      };
+    });
+    return result;
   }
 
   reconnect() {

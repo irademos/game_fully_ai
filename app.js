@@ -2767,6 +2767,7 @@ async function main() {
       if (multiplayer.peer.open) return 'Connected';
       return 'Connecting';
     },
+    getNetworkStats: () => multiplayer?.getNetworkStats?.() ?? {},
     getLastPing: () => multiplayer?.lastPingMs,
     getLastOsmFetch: () => debugState.lastOsmFetchAt,
     getLastError: () => {
