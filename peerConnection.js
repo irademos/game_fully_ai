@@ -5,7 +5,8 @@ import {
   remove,
   onValue,
   get,
-  onDisconnect
+  onDisconnect,
+  serverTimestamp
 } from 'firebase/database';
 
 const VALID_MESSAGE_TYPES = new Set([
@@ -91,7 +92,7 @@ export class Multiplayer {
       await set(peerRef, {
         name: this.playerName,
         roomId: assignedRoom,
-        timestamp: Date.now()
+        timestamp: serverTimestamp()
       });
 
       // Setup server-side disconnection cleanup
@@ -115,16 +116,22 @@ export class Multiplayer {
         // Filter for only currently active peer IDs
         const validPeerIds = allPeerIds.filter(pid => activePeers[pid]);
 
-        // Sort by join timestamp so the most recent becomes host
+        // Prefer most recent join (server timestamp), fallback to deterministic id ordering.
         validPeerIds.sort((a, b) => {
-          return activePeers[b]?.timestamp - activePeers[a]?.timestamp;
+          const bTimestamp = Number(activePeers[b]?.timestamp) || 0;
+          const aTimestamp = Number(activePeers[a]?.timestamp) || 0;
+          if (bTimestamp !== aTimestamp) {
+            return bTimestamp - aTimestamp;
+          }
+          return a.localeCompare(b);
         });
 
         console.log("My ID:", this.id);
         console.log("Valid Peers (more recent first):", validPeerIds);
 
-        // The latest joined player becomes the host
-        const hostPeerId = validPeerIds[0];
+        // Keep existing host if still connected; otherwise pick the most recent joiner.
+        const currentHostStillValid = this.currentHostId && validPeerIds.includes(this.currentHostId);
+        const hostPeerId = currentHostStillValid ? this.currentHostId : validPeerIds[0];
         const previousHostId = this.currentHostId;
         this.currentHostId = hostPeerId;
         this.isHost = (hostPeerId === this.id);

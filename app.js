@@ -370,6 +370,17 @@ async function main() {
       Object.entries(data.states).forEach(([id, entry]) => {
         if (!entry) return;
         const { sourceId, ...state } = entry;
+        if (id.startsWith('monster:') && state.modelPath) {
+          const previousModel = monsterSlotModels.get(id) ?? null;
+          if (previousModel && previousModel !== state.modelPath) {
+            console.log('[monster]', 'state-update', {
+              slotId: id,
+              from: previousModel,
+              to: state.modelPath,
+              sourceId
+            });
+          }
+        }
         if (sourceId && sourceId === multiplayer?.getId?.()) {
           const localEntry = networkedEntities.get(id);
           if (localEntry?.isLocallyControlled?.()) {
@@ -651,6 +662,11 @@ async function main() {
 
   multiplayer = new Multiplayer(playerName, handleIncomingData);
   multiplayer.onHostChange = ({ previousHostId, newHostId, isCurrentHost }) => {
+    console.log('[multiplayer]', 'host-change', {
+      previousHostId,
+      newHostId,
+      isCurrentHost
+    });
     if (previousHostId && previousHostId === multiplayer.getId() && previousHostId !== newHostId) {
       const snapshot = serializeAuthoritativeStates();
       if (newHostId) {
@@ -749,6 +765,8 @@ async function main() {
   const monsterSlotIds = ["monster:0", "monster:1"];
   const spawningSlots = new Set();
   const respawnTimers = new Map();
+  const monsterSlotModels = new Map();
+  let warnedNoHostMonsters = false;
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -997,6 +1015,15 @@ async function main() {
     return MONSTER_MODELS[index];
   };
 
+  const getMonsterModelForSlot = (slotId) => {
+    if (!slotId) return getRandomMonsterModel();
+    const existing = monsterSlotModels.get(slotId);
+    if (existing) return existing;
+    const selected = getRandomMonsterModel();
+    monsterSlotModels.set(slotId, selected);
+    return selected;
+  };
+
   const BUILDING_RAYCAST_HEIGHT = 200;
   const BUILDING_LIFT_EPSILON = 0.05;
   const buildingRaycaster = new THREE.Raycaster();
@@ -1165,6 +1192,11 @@ async function main() {
     monster.model = null;
   };
 
+  const removeMonsterState = (slotId) => {
+    if (!slotId) return;
+    authoritativeEntityStates.delete(slotId);
+  };
+
   const setMonsterForSlot = (slotId, monster) => {
     const existingIndex = monsters.findIndex(entry => entry.id === slotId);
     if (existingIndex >= 0) {
@@ -1174,9 +1206,13 @@ async function main() {
     }
   };
 
-  const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null) => {
+  const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null, reason = 'unknown') => {
     if (PERF.disableMonsters) return;
     if (spawningSlots.has(slotId)) return;
+    if (modelPath) {
+      monsterSlotModels.set(slotId, modelPath);
+    }
+    console.log('[monster]', 'spawn', { slotId, modelPath, reason, isHost: multiplayer?.isHost });
     spawningSlots.add(slotId);
     loadMonsterModel(modelPath, data => {
       try {
@@ -1210,6 +1246,7 @@ async function main() {
       monsters.forEach(monster => cleanupMonster(monster));
       monsters = [];
       window.monsters = monsters;
+      monsterSlotIds.forEach(slotId => removeMonsterState(slotId));
       respawnTimers.forEach((timer) => clearTimeout(timer));
       respawnTimers.clear();
       return;
@@ -1233,7 +1270,7 @@ async function main() {
     monsterSlotIds.forEach((slotId) => {
       const existing = monsters.find(entry => entry.id === slotId);
       if (!existing && !spawningSlots.has(slotId) && !respawnTimers.has(slotId)) {
-        spawnMonsterInSlot(slotId, getRandomMonsterModel());
+        spawnMonsterInSlot(slotId, getMonsterModelForSlot(slotId), null, 'ensure');
       }
     });
   };
@@ -1265,8 +1302,26 @@ async function main() {
         const [px, py, pz] = state.position || [];
         const [rx, ry, rz, rw] = state.rotation || [];
         const current = monsters.find(entry => entry.id === slotId);
+        if (state.mode === 'dead' && state.health <= 0) {
+          if (current) {
+            cleanupMonster(current);
+            monsters = monsters.filter(entry => entry.id !== slotId);
+            window.monsters = monsters;
+          }
+          return;
+        }
+        if (state.modelPath) {
+          monsterSlotModels.set(slotId, state.modelPath);
+        }
         if (state.modelPath && (!current || current.modelPath !== state.modelPath)) {
-          spawnMonsterInSlot(slotId, state.modelPath, current);
+          if (current?.modelPath && current.modelPath !== state.modelPath) {
+            console.log('[monster]', 'model-change', {
+              slotId,
+              from: current.modelPath,
+              to: state.modelPath
+            });
+          }
+          spawnMonsterInSlot(slotId, state.modelPath, current, 'state');
         }
         const monster = monsters.find(entry => entry.id === slotId);
         if (!monster?.model) return;
@@ -1285,12 +1340,6 @@ async function main() {
         if (typeof state.health === 'number') {
           monster.health = state.health;
           monster.model.userData.health = state.health;
-        }
-        if (state.mode === 'dead' && state.health <= 0) {
-          cleanupMonster(monster);
-          monsters = monsters.filter(entry => entry.id !== slotId);
-          window.monsters = monsters;
-          return;
         }
         if (state.action && monster.model.userData.currentAction !== state.action) {
           const fade = state.action === 'Weapon' ? 0.1 : 0.2;
@@ -3266,6 +3315,7 @@ async function main() {
 
     const isHost = !multiplayer || multiplayer.isHost;
     if (isHost) {
+      warnedNoHostMonsters = false;
       ensureMonsters();
       const nowMs = Date.now();
       monsters.forEach(monster => {
@@ -3276,10 +3326,11 @@ async function main() {
             cleanupMonster(monster);
             monsters = monsters.filter(entry => entry.id !== slotId);
             window.monsters = monsters;
+            removeMonsterState(slotId);
             const delay = THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
             const timer = setTimeout(() => {
               respawnTimers.delete(slotId);
-              spawnMonsterInSlot(slotId, getRandomMonsterModel());
+              spawnMonsterInSlot(slotId, getMonsterModelForSlot(slotId), null, 'respawn');
             }, delay);
             respawnTimers.set(slotId, timer);
           }
@@ -3296,6 +3347,13 @@ async function main() {
         }
       });
     } else {
+      if (!warnedNoHostMonsters && monsters.length === 0) {
+        console.log('[monster]', 'no-host-monsters', {
+          hostId: multiplayer?.currentHostId ?? null,
+          localId: multiplayer?.getId?.() ?? null
+        });
+        warnedNoHostMonsters = true;
+      }
       monsters.forEach(monster => {
         monster?.model && monster.update(monsterAnimDelta);
       });
