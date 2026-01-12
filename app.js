@@ -2593,7 +2593,7 @@ async function main() {
     const lonScale = metersPerDegreeLon(worldOrigin.lat);
     return {
       x: (location.lon - worldOrigin.lon) * lonScale,
-      z: -(location.lat - worldOrigin.lat) * METERS_PER_DEGREE_LAT
+      z: (location.lat - worldOrigin.lat) * METERS_PER_DEGREE_LAT
     };
   };
 
@@ -2636,7 +2636,7 @@ async function main() {
     const lonScale = metersPerDegreeLon(origin.centerLat);
     return {
       x: (lon - origin.centerLon) * lonScale,
-      z: -(lat - origin.centerLat) * METERS_PER_DEGREE_LAT
+      z: (lat - origin.centerLat) * METERS_PER_DEGREE_LAT
     };
   };
 
@@ -2644,7 +2644,7 @@ async function main() {
     if (!origin || !Number.isFinite(x) || !Number.isFinite(z)) return null;
     const lonScale = metersPerDegreeLon(origin.centerLat);
     return {
-      lat: origin.centerLat - z / METERS_PER_DEGREE_LAT,
+      lat: origin.centerLat + z / METERS_PER_DEGREE_LAT,
       lon: origin.centerLon + x / lonScale
     };
   };
