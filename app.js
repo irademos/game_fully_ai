@@ -2581,6 +2581,8 @@ async function main() {
       pendingMapRebuild = true;
     }
     currentRenderOrigin = null;
+    didInitialGpsSnap = false;
+    window.clearTileCache?.();
   }
 
   const GPS_SNAP_DISTANCE_METERS = 20;
@@ -2887,7 +2889,11 @@ async function main() {
         locationState.playerX = playerMeters.x;
         locationState.playerZ = playerMeters.z;
 
-        if (!didInitialGpsSnap) {
+        if (mapViewEnabled) {
+          applyPlayerMeters(playerMeters);
+          didInitialGpsSnap = true;
+          playerControls?.clearGpsMoveTarget?.();
+        } else if (!didInitialGpsSnap) {
           applyPlayerMeters(playerMeters);
           didInitialGpsSnap = true;
         } else if (playerControls && playerModel) {
@@ -3367,6 +3373,12 @@ async function main() {
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
     const frameDelta = clock.getDelta();
+    if (mapViewEnabled && playerControls?.body && playerModel) {
+      const { x, y, z } = playerModel.position;
+      playerControls.body.setTranslation({ x, y, z }, true);
+      playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
     physicsAccumulator += frameDelta;
     while (physicsAccumulator >= FIXED_DT) {
       // applyGlobalGravity(rapierWorld, window.moon);
