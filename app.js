@@ -3990,6 +3990,7 @@ async function main() {
       if (!entry.geojson) continue;
       mapRenderer.updateTileHighways?.(tileKey, entry.geojson, bounds);
       buildingsRenderer.updateTileBuildings?.(tileKey, entry.geojson, bounds);
+      natureController?.refreshTile?.(tileKey);
     }
 
     const finishBuildingRender = () => {

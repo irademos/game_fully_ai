@@ -23,6 +23,7 @@ const TREE_ROAD_CLEARANCE = 4.5;
 const TREE_BUILDING_CLEARANCE = 2.5;
 const BUILDING_RAYCAST_HEIGHT = 200;
 const DEBUG_COLOR = 0xffeb3b;
+const DEBUG_REMOVAL_COLOR = 0xff1744;
 const DEBUG_ROAD_OPACITY = 0.9;
 const DEBUG_BUILDING_OPACITY = 0.65;
 
@@ -113,6 +114,8 @@ export async function createNature({
   const roadSegmentsByTile = new Map();
   const roadDebugByTile = new Map();
   const buildingDebugByTile = new Map();
+  const buildingPolygonsByTile = new Map();
+  const treeRemovalDebugByTile = new Map();
 
   const tempStart = new THREE.Vector3();
   const tempEnd = new THREE.Vector3();
@@ -125,6 +128,78 @@ export async function createNature({
 
   // const isDebugEnabled = () => Boolean(globalThis?.DEBUG_TREE_BLOCKERS);
   const isDebugEnabled = () => Boolean(true);
+
+  const collectBuildingPolygons = (geojson) => {
+    const polygons = [];
+    const features = geojson?.features ?? [];
+    for (const feature of features) {
+      if (!feature?.properties?.building) continue;
+      const geometry = feature.geometry;
+      if (!geometry) continue;
+      if (geometry.type === 'Polygon') {
+        polygons.push(geometry.coordinates);
+      } else if (geometry.type === 'MultiPolygon') {
+        for (const polygon of geometry.coordinates) {
+          polygons.push(polygon);
+        }
+      }
+    }
+    return polygons;
+  };
+
+  const getBuildingPolygonsForTile = (tileKey) => {
+    if (!tileKey || !activeTileCache?.getEntry) return [];
+    if (buildingPolygonsByTile.has(tileKey)) {
+      return buildingPolygonsByTile.get(tileKey) ?? [];
+    }
+    const entry = activeTileCache.getEntry(tileKey);
+    const polygons = collectBuildingPolygons(entry?.geojson);
+    buildingPolygonsByTile.set(tileKey, polygons);
+    return polygons;
+  };
+
+  const normalizeRing = (ring) => {
+    if (!ring || ring.length === 0) return [];
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first[0] === last[0] && first[1] === last[1]) return ring.slice(0, -1);
+    return ring;
+  };
+
+  const pointInRing = (point, ring) => {
+    const [px, py] = point;
+    let inside = false;
+    const coords = normalizeRing(ring);
+    for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+      const [xi, yi] = coords[i];
+      const [xj, yj] = coords[j];
+      const intersect = ((yi > py) !== (yj > py))
+        && (px < ((xj - xi) * (py - yi)) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  };
+
+  const pointInPolygon = (point, rings) => {
+    if (!rings?.length) return false;
+    // Treat courtyards/holes as blocked too.
+    return pointInRing(point, rings[0]);
+  };
+
+  const isInsideBuildingFootprint = (position, tileKey) => {
+    const geo = getGeoForLocal?.(position);
+    if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) return false;
+    const point = [geo.lon, geo.lat];
+    const keys = tileKey ? getNeighborTileKeys(tileKey) : [];
+    for (const key of keys) {
+      const polygons = getBuildingPolygonsForTile(key);
+      if (!polygons.length) continue;
+      for (const rings of polygons) {
+        if (pointInPolygon(point, rings)) return true;
+      }
+    }
+    return false;
+  };
 
 
   const disposeDebugEntry = (entry) => {
@@ -158,6 +233,11 @@ export async function createNature({
       disposeDebugEntry(entry);
     }
     buildingDebugByTile.clear();
+    for (const entry of treeRemovalDebugByTile.values()) {
+      debugGroup.remove(entry);
+      disposeDebugEntry(entry);
+    }
+    treeRemovalDebugByTile.clear();
   };
 
   const getTileKey = (tile) => `${tile.x},${tile.y}`;
@@ -170,6 +250,46 @@ export async function createNature({
   const getTileGroup = (rootGroup, prefix, tileKey) => {
     if (!rootGroup || !tileKey) return null;
     return rootGroup.getObjectByName(`${prefix}-${tileKey}`) ?? null;
+  };
+
+  const getTreeRemovalDebugGroup = (tileKey) => {
+    if (!tileKey) return null;
+    let groupEntry = treeRemovalDebugByTile.get(tileKey);
+    if (groupEntry) return groupEntry;
+    groupEntry = new THREE.Group();
+    groupEntry.name = `tree-removal-debug-${tileKey}`;
+    treeRemovalDebugByTile.set(tileKey, groupEntry);
+    debugGroup.add(groupEntry);
+    return groupEntry;
+  };
+
+  const addTreeRemovalMarker = (tileKey, position, reason) => {
+    if (!isDebugEnabled()) return;
+    const groupEntry = getTreeRemovalDebugGroup(tileKey);
+    if (!groupEntry || !position) return;
+    const size = 1.6;
+    const y = position.y + 0.1;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(
+        new Float32Array([
+          position.x - size, y, position.z - size,
+          position.x + size, y, position.z + size,
+          position.x - size, y, position.z + size,
+          position.x + size, y, position.z - size
+        ]),
+        3
+      )
+    );
+    const material = new THREE.LineBasicMaterial({
+      color: DEBUG_REMOVAL_COLOR,
+      transparent: true,
+      opacity: 0.95
+    });
+    const lines = new THREE.LineSegments(geometry, material);
+    lines.name = `tree-removal-${reason ?? 'unknown'}`;
+    groupEntry.add(lines);
   };
 
   const cacheRoadSegmentsForTile = (tileKey) => {
@@ -278,29 +398,51 @@ export async function createNature({
   const buildingRaycaster = new THREE.Raycaster();
   const buildingRayDirection = new THREE.Vector3(0, -1, 0);
 
-  const isNearBuilding = (position, tileKey) => {
+  const getBuildingBlockerInfo = (position, tileKey) => {
     const buildingsGroup = buildingsRenderer?.group;
-    if (!buildingsGroup) return false;
+    if (!buildingsGroup) {
+      if (isDebugEnabled()) {
+        console.log('[nature] building check skipped (no buildings group).', { tileKey });
+      }
+      return { blocked: false, reason: 'no-buildings', intersections: [] };
+    }
     const targetTiles = tileKey ? getNeighborTileKeys(tileKey) : [];
-    const groupsToCheck = targetTiles.length
+    // Footprint is lon/lat and can drift vs rendered mesh; use raycasts as truth.
+    // if (isInsideBuildingFootprint(position, tileKey)) {
+    //   return { blocked: true, reason: 'footprint', intersections: [] };
+    // }
+    let groupsToCheck = targetTiles.length
       ? targetTiles
-        .map((key) => getTileGroup(buildingsGroup, 'osm-buildings', key))
+        .map((key) => {
+          const tileGroup = getTileGroup(buildingsGroup, 'osm-buildings', key);
+          return tileGroup?.getObjectByName(`building-collision-${key}`) ?? tileGroup;
+        })
         .filter(Boolean)
       : [buildingsGroup];
-    if (groupsToCheck.length === 0) return false;
+    if (groupsToCheck.length === 0) {
+      groupsToCheck = [buildingsGroup];
+    }
+    for (const group of groupsToCheck) {
+      group.updateWorldMatrix(true, true);
+    }
     const terrainY = getTerrainHeight?.(position.x, position.z) ?? position.y ?? 0;
-    const rayOrigin = tempPosition.set(
+    const rayBaseY = Math.max(position.y ?? terrainY, terrainY);
+    const rayOriginDown = tempPosition.set(
       position.x,
-      Math.max(position.y ?? terrainY, terrainY) + BUILDING_RAYCAST_HEIGHT,
+      rayBaseY + BUILDING_RAYCAST_HEIGHT,
       position.z
     );
-    buildingRaycaster.set(rayOrigin, buildingRayDirection);
+    buildingRaycaster.near = 0;
+    buildingRaycaster.far = BUILDING_RAYCAST_HEIGHT + Math.max(0, rayBaseY) + TREE_BUILDING_CLEARANCE;
+    buildingRaycaster.set(rayOriginDown, buildingRayDirection);
     const intersections = buildingRaycaster.intersectObjects(groupsToCheck, true);
-    if (!intersections.length) return false;
-    const nearest = intersections[0];
-    if (!nearest) return false;
-    return nearest.distance <= BUILDING_RAYCAST_HEIGHT + TREE_BUILDING_CLEARANCE;
+    if (intersections.length > 0) {
+      return { blocked: true, reason: 'raycast', intersections };
+    }
+    return { blocked: false, reason: 'none', intersections: [] };
   };
+
+  const isNearBuilding = (position, tileKey) => getBuildingBlockerInfo(position, tileKey).blocked;
 
   const isNearRoad = (x, z, tileKey) => {
     const keys = tileKey ? getNeighborTileKeys(tileKey) : [];
@@ -378,16 +520,32 @@ export async function createNature({
   const pruneTileTrees = (tileKey) => {
     const entry = treeTiles.get(tileKey);
     if (!entry) return;
+    if (isDebugEnabled()) {
+      removeDebugEntry(treeRemovalDebugByTile, tileKey);
+    }
     const remaining = [];
     for (const tree of entry.trees) {
       if (!tree) continue;
       const { x, z } = tree.position;
       if (isNearRoad(x, z, tileKey)) {
         entry.group.remove(tree);
+        addTreeRemovalMarker(tileKey, tree.position, 'road');
+        console.log('[nature] removed tree near road.', {
+          tileKey,
+          position: { x: tree.position.x, y: tree.position.y, z: tree.position.z }
+        });
         continue;
       }
-      if (isNearBuilding(tree.position, tileKey)) {
+      const buildingInfo = getBuildingBlockerInfo(tree.position, tileKey);
+      if (buildingInfo.blocked) {
         entry.group.remove(tree);
+        addTreeRemovalMarker(tileKey, tree.position, `building-${buildingInfo.reason}`);
+        console.log('[nature] removed tree near building.', {
+          tileKey,
+          position: { x: tree.position.x, y: tree.position.y, z: tree.position.z },
+          reason: buildingInfo.reason,
+          intersections: buildingInfo.intersections?.length ?? 0
+        });
         continue;
       }
       remaining.push(tree);
@@ -422,15 +580,22 @@ export async function createNature({
       group.remove(entry.group);
       treeTiles.delete(key);
       roadSegmentsByTile.delete(key);
+      buildingPolygonsByTile.delete(key);
       removeDebugEntry(roadDebugByTile, key);
       removeDebugEntry(buildingDebugByTile, key);
+      removeDebugEntry(treeRemovalDebugByTile, key);
     }
   };
 
   const refreshTile = (tileKey) => {
     if (!tileKey) return;
+    buildingPolygonsByTile.delete(tileKey);
     cacheRoadSegmentsForTile(tileKey);
     pruneTileTrees(tileKey);
+    for (const neighborKey of getNeighborTileKeys(tileKey)) {
+      if (neighborKey === tileKey) continue;
+      pruneTileTrees(neighborKey);
+    }
     if (!isDebugEnabled()) {
       removeDebugEntry(buildingDebugByTile, tileKey);
       return;
@@ -440,14 +605,42 @@ export async function createNature({
     if (!buildingsGroup) return;
     const tileGroup = getTileGroup(buildingsGroup, 'osm-buildings', tileKey);
     if (!tileGroup) return;
-    tempBox.setFromObject(tileGroup);
-    if (!Number.isFinite(tempBox.min.x) || !Number.isFinite(tempBox.max.x)) return;
-    const helper = new THREE.Box3Helper(tempBox, DEBUG_COLOR);
-    helper.material.transparent = true;
-    helper.material.opacity = DEBUG_BUILDING_OPACITY;
-    helper.name = `tree-building-debug-${tileKey}`;
-    buildingDebugByTile.set(tileKey, helper);
-    debugGroup.add(helper);
+    const helperGroup = new THREE.Group();
+    helperGroup.name = `tree-building-debug-${tileKey}`;
+    const collisionMesh =
+      tileGroup.getObjectByName(`extruded-collider-${tileKey}`) ??
+      tileGroup.getObjectByName(`extruded-mesh-${tileKey}`) ??
+      null;
+    const meshes = [];
+    if (collisionMesh?.isMesh && collisionMesh.geometry) {
+      meshes.push(collisionMesh);
+    } else {
+      tileGroup.traverse((child) => {
+        if (child?.isMesh && child.geometry) meshes.push(child);
+      });
+    }
+
+    for (const mesh of meshes) {
+      if (!mesh.geometry?.attributes?.position) continue;
+      mesh.updateWorldMatrix(true, false);
+      const edges = new THREE.EdgesGeometry(mesh.geometry);
+      const material = new THREE.LineBasicMaterial({
+        color: DEBUG_COLOR,
+        transparent: true,
+        opacity: DEBUG_BUILDING_OPACITY
+      });
+      const lines = new THREE.LineSegments(edges, material);
+      lines.matrixAutoUpdate = false;
+      lines.matrix.copy(mesh.matrixWorld);
+      helperGroup.add(lines);
+    }
+
+    if (!helperGroup.children.length) {
+      helperGroup.clear();
+      return;
+    }
+    buildingDebugByTile.set(tileKey, helperGroup);
+    debugGroup.add(helperGroup);
   };
 
   const refreshAll = () => {
@@ -470,6 +663,7 @@ export async function createNature({
     }
     treeTiles.clear();
     roadSegmentsByTile.clear();
+    buildingPolygonsByTile.clear();
     clearDebug();
   };
 
@@ -480,6 +674,7 @@ export async function createNature({
     }
     treeTiles.clear();
     roadSegmentsByTile.clear();
+    buildingPolygonsByTile.clear();
     clearDebug();
     group.clear();
     scene?.remove(group);
