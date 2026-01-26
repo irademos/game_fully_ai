@@ -516,7 +516,7 @@ async function main() {
   const HUNGER_DECAY_PER_HOUR = 6;
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
-  const PICKUP_RADIUS = 1.2;
+  const PICKUP_RADIUS = 1.8;
   const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
   const MAX_HEALTH_PICKUPS = 60;
@@ -593,6 +593,16 @@ async function main() {
   let lastPresenceSweep = 0;
   let remoteAnimAccumulator = 0;
   let monsterAnimAccumulator = 0;
+
+  let monsters = [];
+  window.monsters = monsters;
+  const monsterSlotIds = ["monster:0", "monster:1"];
+  const spawningSlots = new Set();
+  const respawnTimers = new Map();
+  let monstersSeeded = false;
+  let monsterSnapshotLoaded = false;
+  let unsubscribeMonsterUpdates = null;
+  const recentMonsterHits = new Map();
 
   scene = new THREE.Scene();
   const rotateSkyboxFaceClockwise = (image) => {
@@ -1469,16 +1479,6 @@ async function main() {
   // Expose to window for debugging
   window.breakManager = breakManager;
 
-  let monsters = [];
-  window.monsters = monsters;
-  const monsterSlotIds = ["monster:0", "monster:1"];
-  const spawningSlots = new Set();
-  const respawnTimers = new Map();
-  let monstersSeeded = false;
-  let monsterSnapshotLoaded = false;
-  let unsubscribeMonsterUpdates = null;
-  const recentMonsterHits = new Map();
-
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
@@ -1986,6 +1986,13 @@ async function main() {
       lon: origin.centerLon - position.x / lonScale
     };
   };
+  appleController = await createApples({
+    scene,
+    getTerrainHeight,
+    allowDefaultPositions: false
+  });
+  applePickups = appleController?.pickups || [];
+  window.applePickups = applePickups;
   natureController = await createNature({
     scene,
     playerModel,
@@ -1993,7 +2000,9 @@ async function main() {
     mapRenderer,
     buildingsRenderer,
     getGeoForLocal: getTreeGeoForLocal,
-    tileCache
+    tileCache,
+    spawnApplePickup: appleController?.spawnPickup,
+    removeApplePickup: appleController?.removePickup
   });
   natureController?.update(playerModel?.position);
   await createCabin({ scene, getTerrainHeight });
@@ -2005,16 +2014,6 @@ async function main() {
   });
   mushroomPickups = mushroomController?.pickups || [];
   window.mushroomPickups = mushroomPickups;
-  appleController = await createApples({
-    scene,
-    getTerrainHeight,
-    spawnPositions: [
-      { x: 1.6, z: 1.2 },
-      { x: -1.4, z: 0.6 }
-    ]
-  });
-  applePickups = appleController?.pickups || [];
-  window.applePickups = applePickups;
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
@@ -5823,7 +5822,7 @@ async function main() {
     }
 
     Object.values(otherPlayers).forEach(player => {
-      if (!player?.targetPos || !player?.targetQuat) return;
+      if (!player?.model || !player?.targetPos || !player?.targetQuat) return;
       const currentPos = player.model.position;
       const distance = currentPos.distanceTo(player.targetPos);
       if (distance > REMOTE_TELEPORT_THRESHOLD_M) {

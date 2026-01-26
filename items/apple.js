@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 const APPLE_MODEL_URL = '/assets/props/apple.glb';
-const APPLE_SCALE = 0.25;
-const APPLE_LIFT = 0.25;
+const APPLE_SCALE = 0.35;
+const APPLE_LIFT = 0.3;
 
 export const APPLE_ITEM_ID = 'apple';
 
@@ -44,7 +44,8 @@ const cloneApple = (source) => {
 export async function createApples({
   scene,
   getTerrainHeight,
-  spawnPositions = DEFAULT_APPLE_POSITIONS
+  spawnPositions = DEFAULT_APPLE_POSITIONS,
+  allowDefaultPositions = true
 } = {}) {
   if (!scene) return null;
 
@@ -65,44 +66,55 @@ export async function createApples({
   const pickups = [];
   const positions = Array.isArray(spawnPositions) && spawnPositions.length > 0
     ? spawnPositions
-    : DEFAULT_APPLE_POSITIONS;
+    : (allowDefaultPositions ? DEFAULT_APPLE_POSITIONS : []);
 
-  positions.forEach((position) => {
+  const createPickupMesh = (position, options = {}) => {
     const spawnPosition = toVector3(position);
-    if (!spawnPosition) return;
-    const terrainY = getTerrainHeight?.(spawnPosition.x, spawnPosition.z);
-    if (Number.isFinite(terrainY)) {
-      spawnPosition.y = terrainY;
+    if (!spawnPosition) return null;
+    const applyTerrainHeight = options.applyTerrainHeight ?? true;
+    if (applyTerrainHeight) {
+      const terrainY = getTerrainHeight?.(spawnPosition.x, spawnPosition.z);
+      if (Number.isFinite(terrainY)) {
+        spawnPosition.y = terrainY;
+      }
     }
     const mesh = cloneApple(modelRoot);
     mesh.position.copy(spawnPosition);
-    mesh.position.y += APPLE_LIFT;
+    mesh.position.y += options.lift ?? APPLE_LIFT;
     mesh.rotation.y = Math.random() * Math.PI * 2;
-    group.add(mesh);
+    const parent = options.parent ?? group;
+    parent.add(mesh);
+    return mesh;
+  };
+
+  positions.forEach((position) => {
+    const mesh = createPickupMesh(position);
+    if (!mesh) return;
     pickups.push({ id: APPLE_ITEM_ID, mesh });
   });
 
-  const spawnPickup = (position) => {
+  const spawnPickup = (position, options = {}) => {
     if (!position) return null;
-    const spawnPosition = toVector3(position);
-    if (!spawnPosition) return null;
-    const terrainY = getTerrainHeight?.(spawnPosition.x, spawnPosition.z);
-    if (Number.isFinite(terrainY)) {
-      spawnPosition.y = terrainY;
-    }
-    const mesh = cloneApple(modelRoot);
-    mesh.position.copy(spawnPosition);
-    mesh.position.y += APPLE_LIFT;
-    mesh.rotation.y = Math.random() * Math.PI * 2;
-    group.add(mesh);
+    const mesh = createPickupMesh(position, options);
+    if (!mesh) return null;
     const pickup = { id: APPLE_ITEM_ID, mesh };
     pickups.push(pickup);
     return pickup;
   };
 
+  const removePickup = (pickup) => {
+    if (!pickup) return false;
+    const index = pickups.indexOf(pickup);
+    if (index === -1) return false;
+    pickups.splice(index, 1);
+    pickup.mesh?.parent?.remove(pickup.mesh);
+    return true;
+  };
+
   return {
     group,
     pickups,
-    spawnPickup
+    spawnPickup,
+    removePickup
   };
 }
