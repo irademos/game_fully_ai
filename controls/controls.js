@@ -113,6 +113,7 @@ export class PlayerControls {
     this.wasFrozen = false;
     this.slideMomentum = new THREE.Vector3();
     this.lastMoveDirection = new THREE.Vector3();
+    this.lastIdlePosition = null;
     this.grabbedTarget = null;
     this.isGrabbed = false;
     this.grabberId = null;
@@ -132,6 +133,7 @@ export class PlayerControls {
     this.geoBoundsShiftMeters = { x: 0, z: 0 };
     this.geoBoundHalfSizeM = 8;
     this.geoEdgeEpsM = 0.75;
+    this.idleSnapDistance = 0.04;
     this.geoBoundsDebug = null;
     this.geoBoundsDebugHeight = 2;
     this.gpsMoveTarget = null;
@@ -1487,6 +1489,33 @@ export class PlayerControls {
       this.clearGpsMoveTarget();
     }
 
+    const shouldStabilizeIdle = !gpsMoveActive
+      && !pushedByGeo
+      && !this.isClimbing
+      && !this.isKnocked
+      && !this.isGrabbed
+      && !this.vehicle
+      && movement.length() === 0
+      && !this.isSlideMomentumActive();
+    if (shouldStabilizeIdle) {
+      if (!this.lastIdlePosition) {
+        this.lastIdlePosition = new THREE.Vector3(newX, newY, newZ);
+      } else {
+        const dx = newX - this.lastIdlePosition.x;
+        const dz = newZ - this.lastIdlePosition.z;
+        const drift = Math.hypot(dx, dz);
+        if (drift <= this.idleSnapDistance) {
+          newX = this.lastIdlePosition.x;
+          newZ = this.lastIdlePosition.z;
+          this.body?.setTranslation({ x: newX, y: newY, z: newZ }, true);
+        } else {
+          this.lastIdlePosition.set(newX, newY, newZ);
+        }
+      }
+      this.lastIdlePosition.y = newY;
+    } else {
+      this.lastIdlePosition = null;
+    }
 
     const isMovingNow = movement.length() > 0 || pushedByGeo;
     this.isMoving = isMovingNow;
