@@ -19,6 +19,7 @@ const CLIMB_ENTRY_BUFFER_Y = 0.4;
 const FRIENDLY_INTERACT_RANGE = 6;
 const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
+const ENGAGED_MODE_DISTANCE = 7;
 const FRIENDLY_DIALOGUE_POOL = [
   {
     blocks: [
@@ -241,6 +242,11 @@ export class PlayerControls {
     this.lastOcclusionDistance = null;
     this.lastOcclusionYaw = null;
     this.lastOcclusionPitch = null;
+    this.isEngaged = false;
+    this.engagedTarget = null;
+    this.engagedModeDistanceSq = ENGAGED_MODE_DISTANCE * ENGAGED_MODE_DISTANCE;
+    this.engagedTargetPosition = new THREE.Vector3();
+    this.engagedFacingDirection = new THREE.Vector3();
 
     if (this.isMobile && this.interactionPromptEl) {
       const activateInteraction = (event) => {
@@ -409,7 +415,7 @@ export class PlayerControls {
     }, { passive: false });
 
     this.domElement.addEventListener('touchmove', (event) => {
-      if (!this.enabled || this.cameraTouchId === null) return;
+      if (!this.enabled || this.cameraTouchId === null || this.isEngaged) return;
       for (const touch of event.changedTouches) {
         if (touch.identifier === this.cameraTouchId) {
           const deltaX = touch.clientX - this.touchStartX;
@@ -1584,18 +1590,24 @@ export class PlayerControls {
     this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
     this.deltaSeconds = delta;
 
-    const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
-    if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
-    if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
-
-    const maxPitch = Math.PI / 3;   // ~60° upward
-    const minPitch = -Math.PI / 8;  // ~30° downward
-
-    if (this.keys.has('ArrowUp')) {
-      this.pitch = Math.min(maxPitch, this.pitch + 0.02);
+    this.updateEngagedState();
+    if (this.isEngaged) {
+      this.updateEngagedFacing();
     }
-    if (this.keys.has('ArrowDown')) {
-      this.pitch = Math.max(minPitch, this.pitch - 0.02);
+    if (!this.isEngaged) {
+      const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
+      if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
+      if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
+
+      const maxPitch = Math.PI / 3;   // ~60° upward
+      const minPitch = -Math.PI / 8;  // ~30° downward
+
+      if (this.keys.has('ArrowUp')) {
+        this.pitch = Math.min(maxPitch, this.pitch + 0.02);
+      }
+      if (this.keys.has('ArrowDown')) {
+        this.pitch = Math.max(minPitch, this.pitch - 0.02);
+      }
     }
 
     const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
@@ -1632,6 +1644,10 @@ export class PlayerControls {
         orbitCenter.add(rotatedTargetOffset);
       }
       offset = this.cameraOffset;
+    }
+
+    if (this.isEngaged && this.controls) {
+      this.syncOrbitControlsToYawPitch(orbitCenter);
     }
     const rotatedOffset = new THREE.Vector3(
       offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
@@ -2026,6 +2042,69 @@ export class PlayerControls {
     if (!this.playerModel) return;
     const yaw = Math.atan2(direction.x, direction.z);
     this.playerModel.rotation.set(0, yaw, 0);
+  }
+
+  updateEngagedState() {
+    if (!this.playerModel) {
+      this.isEngaged = false;
+      this.engagedTarget = null;
+      return;
+    }
+    const monsters = window.monsters || [];
+    let closest = null;
+    let closestDistanceSq = Infinity;
+    for (const monster of monsters) {
+      if (!monster?.model || monster.isDead || monster.model.userData?.mode === 'dead') continue;
+      const distanceSq = this.playerModel.position.distanceToSquared(monster.model.position);
+      if (distanceSq < closestDistanceSq) {
+        closestDistanceSq = distanceSq;
+        closest = monster;
+      }
+    }
+    if (closest && closestDistanceSq <= this.engagedModeDistanceSq) {
+      this.isEngaged = true;
+      this.engagedTarget = closest;
+    } else {
+      this.isEngaged = false;
+      this.engagedTarget = null;
+    }
+  }
+
+  updateEngagedFacing() {
+    if (!this.isEngaged || !this.engagedTarget?.model || !this.playerModel) return;
+    this.engagedTarget.model.getWorldPosition(this.engagedTargetPosition);
+    this.engagedFacingDirection
+      .copy(this.engagedTargetPosition)
+      .sub(this.playerModel.position);
+    this.engagedFacingDirection.y = 0;
+    if (this.engagedFacingDirection.lengthSq() < 0.0001) return;
+    this.engagedFacingDirection.normalize();
+    const playerYaw = Math.atan2(this.engagedFacingDirection.x, this.engagedFacingDirection.z);
+    // Player faces target
+    this.playerModel.rotation.set(0, playerYaw, 0);
+    // Camera goes behind player (180° around)
+    this.yaw = playerYaw + Math.PI;
+  }
+
+  syncOrbitControlsToYawPitch(orbitCenter) {
+    if (!this.controls) return;
+    // Use your existing pitch limits if needed
+    const maxPitch = Math.PI / 3;
+    const minPitch = -Math.PI / 8;
+    this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
+
+    // Force OrbitControls to match our yaw/pitch
+    this.controls.target.copy(orbitCenter);
+    if (typeof this.controls.setAzimuthalAngle === 'function') {
+      this.controls.setAzimuthalAngle(this.yaw);
+    }
+    if (typeof this.controls.setPolarAngle === 'function') {
+      // OrbitControls polar angle is measured from +Y down.
+      // If your pitch is "up/down around horizon", convert like this:
+      const polar = (Math.PI / 2) - this.pitch;
+      this.controls.setPolarAngle(polar);
+    }
+    this.controls.update();
   }
 
   getProjectileSpawnPosition(direction) {
