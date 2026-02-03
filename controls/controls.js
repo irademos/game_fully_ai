@@ -1720,7 +1720,7 @@ export class PlayerControls {
         // this.playerModel.rotation.y = yawAngle;
       }
       if (this.isFireHeld && this.shouldHoldToFire() && !slideMomentumActive) {
-        const aimDirection = this.getAimDirection(true);
+        const aimDirection = this.getAimDirection();
         yawAngle = Math.atan2(aimDirection.x, aimDirection.z);
       }
       if (this.engagedDirection) {
@@ -2237,7 +2237,7 @@ export class PlayerControls {
   attemptFireProjectileForHand(hand = 'right') {
     const equippedWeapon = this.getEquippedWeapon(hand);
     if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
-      const direction = this.getAimDirection(true);
+      const direction = this.getAimDirection();
       const position = this.getProjectileSpawnPosition(direction);
       const fired = this.throwBomb(position, direction);
       if (fired) {
@@ -2250,7 +2250,7 @@ export class PlayerControls {
     const gun = this.getEquippedGun(hand);
     const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
-    const direction = usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow);
+    const direction = usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection();
     const position = this.getProjectileSpawnPosition(direction);
 
     this.consumeAmmo();
@@ -2347,8 +2347,7 @@ export class PlayerControls {
   updateAimingRotation() {
     if (!this.isFireHeld || !this.shouldHoldToFire()) return;
     const weapon = this.getEquippedWeapon();
-    const invertForBow = weapon?.itemId === 'bow';
-    const direction = this.getAimDirection(invertForBow);
+    const direction = this.getAimDirection();
     this.alignPlayerToDirection(direction);
   }
 
