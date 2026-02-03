@@ -2512,6 +2512,12 @@ async function main() {
     return arrowTemplatePromise;
   }
 
+  const ensureArrowTemplate = () => {
+    if (!arrowTemplate && !arrowTemplatePromise) {
+      void loadArrowTemplate();
+    }
+  };
+
   function cloneArrowMesh(template, scale = ARROW_PROJECTILE_SCALE) {
     if (!template) return null;
     const arrowMesh = template.clone(true);
@@ -2519,12 +2525,6 @@ async function main() {
     arrowMesh.traverse(child => {
       if (!child.isMesh) return;
       child.visible = true;
-      child.geometry = child.geometry?.clone?.() ?? child.geometry;
-      if (Array.isArray(child.material)) {
-        child.material = child.material.map(material => material?.clone?.() ?? material);
-      } else {
-        child.material = child.material?.clone?.() ?? child.material;
-      }
       child.castShadow = true;
       child.receiveShadow = true;
     });
@@ -4734,6 +4734,7 @@ async function main() {
   }
 
   function spawnArrowProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
+    ensureArrowTemplate();
     const latest = spawnArrowProjectile({
       scene,
       list,
@@ -5051,6 +5052,7 @@ async function main() {
   }
 
   function spawnArrowPickup(position, amount = 1, options = {}) {
+    ensureArrowTemplate();
     return spawnAmmoPickup(position, amount, {
       type: 'arrow',
       sparkle: true,

@@ -22,17 +22,25 @@ const createArrowTrailTexture = () => {
   return texture;
 };
 
+let arrowTrailTexture = null;
+const getArrowTrailTexture = () => {
+  if (!arrowTrailTexture) {
+    arrowTrailTexture = createArrowTrailTexture();
+  }
+  return arrowTrailTexture;
+};
+const arrowTrailGeometry = new THREE.PlaneGeometry(0.06, 1.2);
+
 const createArrowTrail = () => {
-  const geometry = new THREE.PlaneGeometry(0.06, 1.2);
   const material = new THREE.MeshBasicMaterial({
     color: 0xffffff,
-    map: createArrowTrailTexture(),
+    map: getArrowTrailTexture(),
     transparent: true,
     opacity: ARROW_TRAIL_MAX_OPACITY,
     depthWrite: false,
     blending: THREE.AdditiveBlending
   });
-  const trail = new THREE.Mesh(geometry, material);
+  const trail = new THREE.Mesh(arrowTrailGeometry, material);
   trail.rotation.x = Math.PI / 2;
   trail.position.z = -0.7;
   trail.visible = false;
