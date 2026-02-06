@@ -7,6 +7,7 @@ const animationFiles = {
   Walk: 'Old Man Walk.fbx',
   Run: 'Drunk Run Forward.fbx',
   Weapon: 'Mutant Punch.fbx',
+  JumpAttack: 'Jump Attack.fbx',
   Death: 'Dying.fbx',
   Hit: 'Flying Back Death.fbx',
   TwistDance: 'Twist Dance.fbx'
@@ -94,6 +95,44 @@ function logMissingAnimation(name, modelPath) {
   console.warn(`Missing monster animation clip "${name}" for model ${modelPath}. Falling back to Idle.`);
 }
 
+function stripRootHorizontalTranslationTracks(clip, rootName) {
+  const candidates = new Set([
+    rootName,
+    'Hips',
+    'mixamorig:Hips',
+    'Root',
+    'mixamorig:Root',
+    'Armature'
+  ].filter(Boolean).map(name => name.toLowerCase()));
+
+  const tracks = clip.tracks
+    .map((track) => {
+      if (!track.name.endsWith('.position')) return track;
+      const nodeName = track.name.split('.')[0].toLowerCase();
+      if (!candidates.has(nodeName)) return track;
+      const valueSize = typeof track.getValueSize === 'function' ? track.getValueSize() : 3;
+      if (valueSize < 3 || !track.values?.length) return track;
+
+      const values = track.values.slice();
+      const baseX = values[0];
+      const baseZ = values[2];
+      for (let i = 0; i < values.length; i += valueSize) {
+        values[i] = baseX;
+        values[i + 2] = baseZ;
+      }
+
+      const times = track.times.slice();
+      return new THREE.VectorKeyframeTrack(track.name, times, values, track.getInterpolation());
+    })
+    .filter((track) => {
+      if (!track.name.endsWith('.matrix')) return true;
+      const nodeName = track.name.split('.')[0].toLowerCase();
+      return !candidates.has(nodeName);
+    });
+
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+}
+
 export function loadMonsterModel(modelPath, callback) {
   const loader = new FBXLoader();
   const configPath = modelPath.replace(/\.[^/.]+$/, '.json');
@@ -150,8 +189,12 @@ export function loadMonsterModel(modelPath, callback) {
             return new Promise((resolve, reject) => {
               const cachedClip = animationClipCache.get(file);
               if (cachedClip) {
-                const action = mixer.clipAction(cachedClip);
-                if (['Weapon', 'Death', 'Hit'].includes(name)) {
+                const rootName = model.name || 'Root';
+                const preparedClip = name === 'JumpAttack'
+                  ? cachedClip
+                  : stripRootHorizontalTranslationTracks(cachedClip, rootName);
+                const action = mixer.clipAction(preparedClip);
+                if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
                 }
@@ -169,8 +212,12 @@ export function loadMonsterModel(modelPath, callback) {
                     return;
                   }
                   animationClipCache.set(file, clip);
-                  const action = mixer.clipAction(clip);
-                  if (['Weapon', 'Death', 'Hit'].includes(name)) {
+                  const rootName = model.name || 'Root';
+                  const preparedClip = name === 'JumpAttack'
+                    ? clip
+                    : stripRootHorizontalTranslationTracks(clip, rootName);
+                  const action = mixer.clipAction(preparedClip);
+                  if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
                   }
