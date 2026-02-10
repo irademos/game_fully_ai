@@ -502,6 +502,34 @@ export class PlayerControls {
     });
   }
 
+  bindMobileActionButtonPress(button, handler) {
+    if (!button || typeof handler !== 'function') return;
+
+    let lastHandledAt = 0;
+    const invoke = (event) => {
+      const now = Date.now();
+      if (now - lastHandledAt < 250) return;
+      lastHandledAt = now;
+      handler(event);
+    };
+
+    button.addEventListener('click', (event) => {
+      invoke(event);
+    });
+
+    if (typeof window !== 'undefined' && 'PointerEvent' in window) {
+      button.addEventListener('pointerdown', (event) => {
+        if (event.pointerType === 'mouse') return;
+        invoke(event);
+      }, { passive: false });
+      return;
+    }
+
+    button.addEventListener('touchstart', (event) => {
+      invoke(event);
+    }, { passive: false });
+  }
+
   initializeActionButtons() {
     const actionContainer = document.getElementById('action-buttons');
     if (!actionContainer) return;
@@ -541,7 +569,10 @@ export class PlayerControls {
         this.isFireHeld = true;
         this.setAiming(true);
       }
-      if (event) event.preventDefault();
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     };
 
     const onAttackPressEnd = (event) => {
@@ -556,7 +587,10 @@ export class PlayerControls {
       } else {
         this.handlePrimaryAttackPress();
       }
-      if (event) event.preventDefault();
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     };
 
     this.punchButton.addEventListener('touchstart', onAttackPressStart, { passive: false });
@@ -571,20 +605,22 @@ export class PlayerControls {
       if (!this.enabled) return;
       this.mobileActionState = this.mobileActionState === 'spell-options' ? 'default' : 'spell-options';
       this.refreshActionButtons();
-      if (event) event.preventDefault();
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     };
-    this.spellsButton.addEventListener('touchstart', onSpellsToggle, { passive: false });
-    this.spellsButton.addEventListener('mousedown', onSpellsToggle);
-    this.spellsButton.addEventListener('click', (event) => event.preventDefault());
+    this.bindMobileActionButtonPress(this.spellsButton, onSpellsToggle);
 
     const openEquip = (event) => {
       if (!this.enabled) return;
       this.showMobileEquipMenu();
-      if (event) event.preventDefault();
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     };
-    this.equipButton.addEventListener('touchstart', openEquip, { passive: false });
-    this.equipButton.addEventListener('mousedown', openEquip);
-    this.equipButton.addEventListener('click', (event) => event.preventDefault());
+    this.bindMobileActionButtonPress(this.equipButton, openEquip);
 
     const handleOptionPick = (slot) => (event) => {
       if (!this.enabled) return;
@@ -601,7 +637,10 @@ export class PlayerControls {
           } else {
             this.handleVoiceMicPress?.();
           }
-          if (event) event.preventDefault();
+          if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
         }
       } else if (this.mobileActionState === 'freeze') {
         this.attemptFireProjectileForHand('right');
@@ -609,15 +648,15 @@ export class PlayerControls {
         this.handlePrimaryAttackPress();
       }
       this.refreshActionButtons();
-      if (event) event.preventDefault();
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     };
 
-    this.optionLeftButton.addEventListener('touchstart', handleOptionPick('left'), { passive: false });
-    this.optionLeftButton.addEventListener('mousedown', handleOptionPick('left'));
-    this.optionCenterButton.addEventListener('touchstart', handleOptionPick('kick'), { passive: false });
-    this.optionCenterButton.addEventListener('mousedown', handleOptionPick('kick'));
-    this.optionRightButton.addEventListener('touchstart', handleOptionPick('right'), { passive: false });
-    this.optionRightButton.addEventListener('mousedown', handleOptionPick('right'));
+    this.bindMobileActionButtonPress(this.optionLeftButton, handleOptionPick('left'));
+    this.bindMobileActionButtonPress(this.optionCenterButton, handleOptionPick('kick'));
+    this.bindMobileActionButtonPress(this.optionRightButton, handleOptionPick('right'));
 
     this.refreshActionButtons();
   }
@@ -717,11 +756,12 @@ export class PlayerControls {
         else appState?.equipInventoryItem?.(item.id);
         this.mobileActionState = 'default';
         this.refreshActionButtons();
-        if (event) event.preventDefault();
+        if (event) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
       };
-      button.addEventListener('touchstart', onEquip, { passive: false });
-      button.addEventListener('mousedown', onEquip);
-      button.addEventListener('click', (event) => event.preventDefault());
+      this.bindMobileActionButtonPress(button, onEquip);
       this.mobileEquipButtons.push(button);
       actionContainer.appendChild(button);
     });
