@@ -370,3 +370,8 @@ export const setMerchantHost = (isHost) => {
 };
 
 export const getMerchantFriendly = () => merchantFriendly;
+
+
+export const getMarketStall = () => marketStall;
+
+export const getMerchantRoadLightModel = () => merchantRoadLight?.model ?? null;
