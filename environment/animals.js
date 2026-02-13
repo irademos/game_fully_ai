@@ -97,11 +97,14 @@ async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight }) {
   const modelRoot = SkeletonUtils.clone(template.baseScene);
   modelRoot.traverse(obj => {
     if (!obj.isMesh) return;
+    obj.visible = true;
+    obj.frustumCulled = false;
     obj.castShadow = true;
     obj.receiveShadow = true;
   });
 
-  const scale = Number.isFinite(template.config.scale) ? template.config.scale : 1;
+  const configuredScale = Number.isFinite(template.config.scale) ? template.config.scale : 1;
+  const scale = Math.max(0.05, Math.abs(configuredScale));
   modelRoot.scale.setScalar(scale);
 
   const box = getModelBounds(modelRoot) || new THREE.Box3(new THREE.Vector3(-0.5, 0, -0.5), new THREE.Vector3(0.5, 1, 0.5));
