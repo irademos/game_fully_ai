@@ -47,8 +47,10 @@ function normalizeLodConfigs(config) {
     .map((lod) => ({
       path: lod.path,
       distance: Number.isFinite(lod.distance) ? lod.distance : null,
+      scaleMultiplier: Number.isFinite(lod.scaleMultiplier) ? lod.scaleMultiplier : 1,
+      bindSkeleton: lod.bindSkeleton === true,
     }))
-    .filter((lod) => lod.distance !== null && lod.distance > 0)
+    .filter((lod) => lod.distance !== null && lod.distance > 0 && lod.scaleMultiplier > 0)
     .sort((a, b) => a.distance - b.distance)
     .filter((lod, index, lods) => index === 0 || lod.distance > lods[index - 1].distance);
 }
@@ -113,16 +115,34 @@ function bindSkinnedMeshesToBaseSkeleton(baseModel, lodModel) {
     }
   });
 
-  if (baseBoneMap.size === 0) return;
+  if (baseBoneMap.size === 0) return false;
+
+  let hasSkinnedMesh = false;
+  let isCompatible = true;
 
   lodModel.traverse((obj) => {
     if (!obj.isSkinnedMesh || !obj.skeleton) return;
-    const bones = obj.skeleton.bones.map((bone) => baseBoneMap.get(bone.name) ?? bone);
+    hasSkinnedMesh = true;
+    for (const bone of obj.skeleton.bones) {
+      if (!baseBoneMap.has(bone.name)) {
+        isCompatible = false;
+        return;
+      }
+    }
+  });
+
+  if (!hasSkinnedMesh || !isCompatible) return false;
+
+  lodModel.traverse((obj) => {
+    if (!obj.isSkinnedMesh || !obj.skeleton) return;
+    const bones = obj.skeleton.bones.map((bone) => baseBoneMap.get(bone.name));
     const skeleton = new THREE.Skeleton(bones, obj.skeleton.boneInverses);
     skeleton.calculateInverses();
     obj.bind(skeleton, obj.bindMatrix);
     obj.skeleton = skeleton;
   });
+
+  return true;
 }
 
 function stripEmbeddedLights(model) {
@@ -249,11 +269,28 @@ export function loadMonsterModel(modelPath, callback) {
                   }
                   const lodModel = lodFbx;
                   stripEmbeddedLights(lodModel);
-                  skinnedMeshes.push(...configureMeshCulling(lodModel));
+                  const lodSkinnedMeshes = configureMeshCulling(lodModel);
 
-                  lodModel.scale.set(scale, scale, scale);
+                  const lodScale = scale * lod.scaleMultiplier;
+                  lodModel.scale.set(lodScale, lodScale, lodScale);
                   applyMaterialBrightness(lodModel, materialBrightness);
-                  bindSkinnedMeshesToBaseSkeleton(model, lodModel);
+
+                  const hasSkinnedLodMeshes = lodSkinnedMeshes.length > 0;
+                  if (hasSkinnedLodMeshes) {
+                    if (!lod.bindSkeleton) {
+                      console.warn('Skipping skinned monster LOD without skeleton binding:', lod.path);
+                      resolve();
+                      return;
+                    }
+                    const bindOk = bindSkinnedMeshesToBaseSkeleton(model, lodModel);
+                    if (!bindOk) {
+                      console.warn('Skipping incompatible monster LOD skeleton:', lod.path);
+                      resolve();
+                      return;
+                    }
+                    skinnedMeshes.push(...lodSkinnedMeshes);
+                  }
+
                   lodModel.updateMatrixWorld(true);
                   const lodBox = new THREE.Box3().setFromObject(lodModel);
                   const lodCenter = lodBox.getCenter(new THREE.Vector3());

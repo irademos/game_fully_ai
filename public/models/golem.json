@@ -1,4 +1,26 @@
 {
   "scale": 1.0,
-  "yOffset": -1.04
+  "yOffset": -1.04,
+  "lods": [
+    {
+      "path": "/models/golem.fbx",
+      "distance": 60,
+      "bindSkeleton": true
+    },
+    {
+      "path": "/models/golem.fbx",
+      "distance": 120,
+      "bindSkeleton": true
+    }
+  ]
+  "lods": [
+    {
+      "path": "/models/golem.fbx",
+      "distance": 24
+    },
+    {
+      "path": "/models/golem.fbx",
+      "distance": 48
+    }
+  ]
 }

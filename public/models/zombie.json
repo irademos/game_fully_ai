@@ -1,5 +1,27 @@
 {
   "scale": 0.01,
   "yOffset": 0.5,
-  "materialBrightness": 10.0
+  "materialBrightness": 10.0,
+  "lods": [
+    {
+      "path": "/models/zombie.fbx",
+      "distance": 60,
+      "bindSkeleton": true
+    },
+    {
+      "path": "/models/zombie.fbx",
+      "distance": 120,
+      "bindSkeleton": true
+    }
+  ]
+  "lods": [
+    {
+      "path": "/models/zombie.fbx",
+      "distance": 22
+    },
+    {
+      "path": "/models/zombie.fbx",
+      "distance": 44
+    }
+  ]
 }
