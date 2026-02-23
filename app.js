@@ -16,6 +16,7 @@ import {
   updateProjectiles,
   removeProjectileAt,
   spawnArrowProjectile,
+  createArrowMesh,
   ATTACKS,
   updateMeleeAttacks,
   Torch,
@@ -5810,26 +5811,6 @@ async function main() {
     }
   }
 
-  function spawnArrowProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
-    const latest = spawnArrowProjectile({
-      scene,
-      list,
-      position,
-      direction,
-      shooterId,
-      template: arrowTemplate,
-      cloneArrowMesh,
-      scale: ARROW_PROJECTILE_SCALE,
-      speed: ARROW_PROJECTILE_SPEED,
-      lifetime: ARROW_PROJECTILE_LIFETIME,
-      spawnProjectile,
-      spawnPickup: (pickupPosition, amount) => spawnArrowPickup(pickupPosition, amount, { noFloat: true })
-    });
-    if (latest) {
-      latest.userData.skipTerrainCorrection = true;
-    }
-  }
-
   const createMeshPool = ({ create }) => {
     const available = [];
     return {
@@ -5848,6 +5829,78 @@ async function main() {
       }
     };
   };
+
+  const arrowProjectileMeshPool = createMeshPool({
+    create: () => {
+      const clone = createArrowMesh({
+        template: arrowTemplate,
+        cloneArrowMesh,
+        direction: new THREE.Vector3(0, 0, 1),
+        scale: ARROW_PROJECTILE_SCALE
+      });
+      clone.visible = true;
+      return clone;
+    }
+  });
+
+  const resetArrowProjectileMeshForReuse = (mesh) => {
+    if (!mesh) return;
+    mesh.visible = true;
+    const trail = mesh.userData?.arrowTrail;
+    if (trail) {
+      trail.visible = false;
+      trail.scale.set(1, 1, 1);
+    }
+  };
+
+  const arrowGroundPickupMeshPool = createMeshPool({
+    create: () => {
+      const arrowMesh = cloneArrowMesh(arrowTemplate, ARROW_PROJECTILE_SCALE);
+      if (arrowMesh) {
+        arrowMesh.rotation.set(0, Math.PI / 2, Math.PI / 2);
+        arrowMesh.visible = true;
+        return arrowMesh;
+      }
+      const geometry = new THREE.CylinderGeometry(0.04, 0.05, 0.6, 8);
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x7b5530,
+        emissive: 0x2b1a0a,
+        emissiveIntensity: 0.35
+      });
+      const fallback = new THREE.Mesh(geometry, material);
+      fallback.rotation.x = Math.PI / 2;
+      fallback.visible = true;
+      return fallback;
+    }
+  });
+
+  function spawnArrowProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
+    const latest = spawnArrowProjectile({
+      scene,
+      list,
+      position,
+      direction,
+      shooterId,
+      speed: ARROW_PROJECTILE_SPEED,
+      lifetime: ARROW_PROJECTILE_LIFETIME,
+      createMesh: () => {
+        const mesh = arrowProjectileMeshPool.acquire();
+        resetArrowProjectileMeshForReuse(mesh);
+        return mesh;
+      },
+      releaseMesh: (mesh) => arrowProjectileMeshPool.release(mesh),
+      spawnProjectile,
+      spawnPickup: (pickupPosition, amount, conversionOptions = {}) => spawnArrowPickup(pickupPosition, amount, {
+        noFloat: true,
+        sparkle: false,
+        usePool: true,
+        ...conversionOptions
+      })
+    });
+    if (latest) {
+      latest.userData.skipTerrainCorrection = true;
+    }
+  }
 
   const bombProjectileMeshPool = createMeshPool({
     create: () => {
@@ -6313,7 +6366,11 @@ async function main() {
     if (!pickup) {
       pickup = new THREE.Mesh(geometry, material);
     }
-    registerPickupEmissiveMaterials(pickup);
+    if (!pickup.userData?.pickupEmissiveRegistered) {
+      registerPickupEmissiveMaterials(pickup);
+      pickup.userData = pickup.userData || {};
+      pickup.userData.pickupEmissiveRegistered = true;
+    }
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
     pickup.userData.skipTerrainCorrection = true;
@@ -6323,6 +6380,7 @@ async function main() {
     pickup.userData.type = options.type || 'ammo';
     pickup.userData.sparkle = !!options.sparkle;
     pickup.userData.noFloat = !!options.noFloat;
+    pickup.userData.releaseMesh = typeof options.releaseMesh === 'function' ? options.releaseMesh : null;
     if (options.sparkle) {
       const light = new THREE.PointLight(0xfff2a8, 0.6, 2);
       light.position.set(0, 0.4, 0);
@@ -6335,18 +6393,26 @@ async function main() {
   }
 
   function spawnArrowPickup(position, amount = 1, options = {}) {
+    const usePool = !!options.usePool;
+    const sparkle = options.sparkle ?? true;
+    const sourceMesh = options.sourceMesh ?? null;
     return spawnAmmoPickup(position, amount, {
       type: 'arrow',
-      sparkle: true,
+      sparkle,
       noFloat: options.noFloat,
       groundOffset: options.groundOffset,
       createMesh: () => {
-        const arrowMesh = cloneArrowMesh(arrowTemplate, ARROW_PROJECTILE_SCALE);
+        const arrowMesh = sourceMesh || (usePool
+          ? arrowGroundPickupMeshPool.acquire()
+          : cloneArrowMesh(arrowTemplate, ARROW_PROJECTILE_SCALE));
         if (arrowMesh) {
-          if (amount > 1) {
-            arrowMesh.scale.multiplyScalar(1.3);
+          arrowMesh.visible = true;
+          const trail = arrowMesh.userData?.arrowTrail;
+          if (trail) {
+            trail.visible = false;
           }
           arrowMesh.rotation.set(0, Math.PI / 2, Math.PI / 2);
+          arrowMesh.scale.setScalar(ARROW_PROJECTILE_SCALE * (amount > 1 ? 1.3 : 1));
           return arrowMesh;
         }
         const geometry = new THREE.CylinderGeometry(0.04, 0.05, 0.6, 8);
@@ -6358,7 +6424,8 @@ async function main() {
         const fallback = new THREE.Mesh(geometry, material);
         fallback.rotation.x = Math.PI / 2;
         return fallback;
-      }
+      },
+      releaseMesh: sourceMesh ? null : (usePool ? (mesh) => arrowGroundPickupMeshPool.release(mesh) : null)
     });
   }
 
@@ -6929,7 +6996,12 @@ async function main() {
     }
   };
   const disposePickup = (pickup) => {
+    if (!pickup) return;
     scene.remove(pickup);
+    if (typeof pickup.userData?.releaseMesh === 'function') {
+      pickup.userData.releaseMesh(pickup);
+      return;
+    }
     pickup.geometry?.dispose();
     pickup.material?.dispose();
   };
