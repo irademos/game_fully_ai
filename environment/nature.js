@@ -510,21 +510,21 @@ export async function createNature({
     return areas;
   };
 
-  const getTreeWorldCenter = (tree) => {
+  const getTreeWorldCenter = (tree, target = tempTreeCenter) => {
     if (!tree) return null;
     if (tree.userData?.boundsCenterLocal) {
-      tempTreeCenter.copy(tree.userData.boundsCenterLocal).applyMatrix4(tree.matrixWorld);
+      target.copy(tree.userData.boundsCenterLocal).applyMatrix4(tree.matrixWorld);
     } else {
-      tempTreeCenter.copy(tree.position);
+      target.copy(tree.position);
     }
     const typeIndex = tree.userData?.treeTypeIndex;
     const shift = TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
     if (shift) {
       const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
       tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
-      tempTreeCenter.addScaledVector(tempTreeRight, shift * scaleFactor);
+      target.addScaledVector(tempTreeRight, shift * scaleFactor);
     }
-    return tempTreeCenter;
+    return target;
   };
 
   const isTreeBlocked = (tree, blockers) => {
@@ -986,9 +986,10 @@ export async function createNature({
     refreshClimbableAreas();
   };
 
-  const getClosestTree = (position, range) => {
+  const getClosestTree = (position, range, options = {}) => {
     if (!position || !Number.isFinite(range)) return null;
     const maxDistance = Math.max(0, range);
+    const filter = typeof options?.filter === 'function' ? options.filter : null;
     let closest = null;
     let closestDistance = Infinity;
     const searchBox = new THREE.Box3();
@@ -999,14 +1000,16 @@ export async function createNature({
         if (!tree?.position) continue;
         if (!tree.userData?.interactable) continue;
         tree.updateWorldMatrix(true, true);
-        if (tree.userData?.boundsCenterLocal) {
-          worldCenter.copy(tree.userData.boundsCenterLocal).applyMatrix4(tree.matrixWorld);
+        if (tree.userData?.boundsCenterLocal || tree.userData?.treeTypeIndex != null) {
+          const center = getTreeWorldCenter(tree, worldCenter);
+          if (!center) continue;
         } else {
           searchBox.setFromObject(tree);
           if (!Number.isFinite(searchBox.min.x)) continue;
           searchBox.getCenter(searchCenter);
           worldCenter.copy(searchCenter);
         }
+        if (filter && !filter(tree, worldCenter)) continue;
         const dx = position.x - worldCenter.x;
         const dz = position.z - worldCenter.z;
         const distance = Math.hypot(dx, dz);
@@ -1145,6 +1148,7 @@ export async function createNature({
     refreshAll,
     setTileCache,
     getClosestTree,
+    getTreeWorldCenter,
     removeTree,
     removeRocksInRadius,
     setTreeColliderEnabled,
