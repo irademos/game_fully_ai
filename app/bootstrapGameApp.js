@@ -39,7 +39,7 @@ import { createApples, APPLE_ITEM_ID } from '../items/apple.js';
 import { createHomeSystem } from '../home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { getSpawnPosition } from '../spawnUtils.js';
+import { getSpawnPosition, getSpawnY } from '../spawnUtils.js';
 import { createLocationProvider } from '../location.js';
 import { fetchOSMData } from '../osmClient.js';
 import { overpassToGeoJSON } from '../osmGeoJson.js';
@@ -1553,9 +1553,7 @@ async function initCore(runtimeContext) {
         return;
       }
 
-      const terrainY = getTerrainHeight(targetX, targetZ);
-      const hasAuthoritativeY = Number.isFinite(data.y);
-      const targetY = hasAuthoritativeY ? data.y : terrainY;
+      const targetY = getSpawnY(targetX, targetZ, 0.6);
 
       if (!player.targetPos) {
         player.targetPos = new THREE.Vector3(targetX, targetY, targetZ);
@@ -1996,10 +1994,10 @@ async function initCore(runtimeContext) {
     },
     applyState: state => {
       if (!iceGun?.mesh || !state) return;
-      const [px, py, pz] = state.position || [];
+      const [px, , pz] = state.position || [];
       const [rx, ry, rz, rw] = state.rotation || [];
-      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-        iceGun.mesh.position.set(px, py, pz);
+      if (Number.isFinite(px) && Number.isFinite(pz)) {
+        iceGun.mesh.position.set(px, getSpawnY(px, pz, 0.5), pz);
       }
       if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
         iceGun.mesh.quaternion.set(rx, ry, rz, rw);
@@ -2109,10 +2107,10 @@ async function initCore(runtimeContext) {
     },
     applyState: state => {
       if (!bow?.mesh || !state) return;
-      const [px, py, pz] = state.position || [];
+      const [px, , pz] = state.position || [];
       const [rx, ry, rz, rw] = state.rotation || [];
-      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-        bow.mesh.position.set(px, py, pz);
+      if (Number.isFinite(px) && Number.isFinite(pz)) {
+        bow.mesh.position.set(px, getSpawnY(px, pz, 0.5), pz);
       }
       if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
         bow.mesh.quaternion.set(rx, ry, rz, rw);
@@ -2162,10 +2160,10 @@ async function initCore(runtimeContext) {
     },
     applyState: state => {
       if (!bomb?.mesh || !state) return;
-      const [px, py, pz] = state.position || [];
+      const [px, , pz] = state.position || [];
       const [rx, ry, rz, rw] = state.rotation || [];
-      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-        bomb.mesh.position.set(px, py, pz);
+      if (Number.isFinite(px) && Number.isFinite(pz)) {
+        bomb.mesh.position.set(px, getSpawnY(px, pz, 0.4), pz);
       }
       if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
         bomb.mesh.quaternion.set(rx, ry, rz, rw);
@@ -2215,10 +2213,10 @@ async function initCore(runtimeContext) {
     },
     applyState: state => {
       if (!autumnSword?.mesh || !state) return;
-      const [px, py, pz] = state.position || [];
+      const [px, , pz] = state.position || [];
       const [rx, ry, rz, rw] = state.rotation || [];
-      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-        autumnSword.mesh.position.set(px, py, pz);
+      if (Number.isFinite(px) && Number.isFinite(pz)) {
+        autumnSword.mesh.position.set(px, getSpawnY(px, pz, 0.5), pz);
       }
       if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
         autumnSword.mesh.quaternion.set(rx, ry, rz, rw);
@@ -2237,6 +2235,8 @@ async function initCore(runtimeContext) {
   runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword };
   window.weapons = { iceGun, bow, bomb, autumnSword };
 
+  const getModelPhysicsBodyYOffset = () => 0;
+
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
     if (!model || !rapierWorld) return null;
@@ -2252,13 +2252,19 @@ async function initCore(runtimeContext) {
     const rbDesc = isKinematic
       ? RAPIER.RigidBodyDesc.kinematicPositionBased()
       : RAPIER.RigidBodyDesc.dynamic();
+    const bodyYOffset = getModelPhysicsBodyYOffset(model);
+    model.userData.physicsBodyYOffset = bodyYOffset;
     rbDesc
-      .setTranslation(model.position.x, model.position.y, model.position.z)
+      .setTranslation(model.position.x, model.position.y - bodyYOffset, model.position.z)
       .setLinearDamping(0.5)
       .setAngularDamping(0.5);
     const rb = rapierWorld.createRigidBody(rbDesc);
     rb.setEnabledRotations(false, true, false, true);
-    const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale);
+    const capsuleHalfHeight = 0.6 * scale;
+    const capsuleRadius = 0.3 * scale;
+    const colliderCenterYOffset = capsuleHalfHeight + capsuleRadius;
+    const colDesc = RAPIER.ColliderDesc.capsule(capsuleHalfHeight, capsuleRadius)
+      .setTranslation(0, colliderCenterYOffset, 0);
     rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
     rbToMesh.set(rb, model);
@@ -2352,10 +2358,10 @@ async function initCore(runtimeContext) {
     },
     applyState: state => {
       if (!lantern?.mesh || !state) return;
-      const [px, py, pz] = state.position || [];
+      const [px, , pz] = state.position || [];
       const [rx, ry, rz, rw] = state.rotation || [];
-      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-        lantern.mesh.position.set(px, py, pz);
+      if (Number.isFinite(px) && Number.isFinite(pz)) {
+        lantern.mesh.position.set(px, getSpawnY(px, pz, 0.2), pz);
       }
       if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
         lantern.mesh.quaternion.set(rx, ry, rz, rw);
@@ -2416,10 +2422,10 @@ async function initCore(runtimeContext) {
     },
     applyState: state => {
       if (!torch?.mesh || !state) return;
-      const [px, py, pz] = state.position || [];
+      const [px, , pz] = state.position || [];
       const [rx, ry, rz, rw] = state.rotation || [];
-      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-        torch.mesh.position.set(px, py, pz);
+      if (Number.isFinite(px) && Number.isFinite(pz)) {
+        torch.mesh.position.set(px, getSpawnY(px, pz, 0.2), pz);
       }
       if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
         torch.mesh.quaternion.set(rx, ry, rz, rw);
@@ -2643,11 +2649,34 @@ async function initCore(runtimeContext) {
     return null;
   };
 
+  const getBuildingTopSpawnY = (x, z, candidateY, offset = 0.6) => {
+    const intersection = getBuildingIntersection({ x, y: candidateY, z });
+    if (!intersection) return null;
+    const targetY = intersection.point.y + offset;
+    return Number.isFinite(targetY) ? targetY : null;
+  };
+
+  const getSpawnYWithPolicy = (x, z, offset = 0.6, { allowOnBuildings = false } = {}) => getSpawnY(
+    x,
+    z,
+    offset,
+    {
+      allowOnBuildings,
+      getBuildingTopY: getBuildingTopSpawnY
+    }
+  );
+
+  const applySpawnYToPosition = (position, offset = 0.6, options) => {
+    if (!position) return null;
+    position.y = getSpawnYWithPolicy(position.x, position.z, offset, options);
+    return position.y;
+  };
+
   const liftPositionToBuildingTop = (position, heightOffset = 0.6) => {
-    const intersection = getBuildingIntersection(position);
-    if (!intersection) return false;
-    const targetY = intersection.point.y + heightOffset;
-    if (targetY <= position.y + BUILDING_LIFT_EPSILON) return false;
+    if (!position) return false;
+    const previousY = position.y;
+    const targetY = getSpawnYWithPolicy(position.x, position.z, heightOffset, { allowOnBuildings: true });
+    if (targetY <= previousY + BUILDING_LIFT_EPSILON) return false;
     position.y = targetY;
     return true;
   };
@@ -2662,6 +2691,7 @@ async function initCore(runtimeContext) {
     detachPhysics: detachMonsterPhysics,
     getTerrainHeight,
     liftPositionToBuildingTop,
+    resolveSpawnY: (x, z, offset = 0.5) => getSpawnYWithPolicy(x, z, offset, { allowOnBuildings: true }),
     isHost,
     debug: window.DEBUG_FRIENDLY_PERSIST,
     onSpawnEvent: handleCharacterSpawnEvent,
@@ -2815,10 +2845,7 @@ async function initCore(runtimeContext) {
           0,
           Math.sin(offsetAngle) * offsetRadius
         ));
-        const terrainHeight = getTerrainHeight(clusterPosition.x, clusterPosition.z);
-        if (Number.isFinite(terrainHeight)) {
-          clusterPosition.y = terrainHeight + 0.5;
-        }
+        clusterPosition.y = getSpawnY(clusterPosition.x, clusterPosition.z, 0.5);
         spawnMonsterInSlot(slotId, modelPath, null, {
           position: clusterPosition,
           rotation,
@@ -2838,7 +2865,8 @@ async function initCore(runtimeContext) {
         scene,
         attachPhysics: attachMonsterPhysics,
         getTerrainHeight,
-        liftPositionToBuildingTop
+        liftPositionToBuildingTop,
+        resolveSpawnY: (x, z, offset = 0.5) => getSpawnYWithPolicy(x, z, offset, { allowOnBuildings: true })
       });
       return;
     }
@@ -2863,8 +2891,7 @@ async function initCore(runtimeContext) {
         0,
         playerModel.position.z + Math.sin(angle) * radius
       );
-      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-      spawnPos.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.5 : 0.5;
+      spawnPos.y = getSpawnY(spawnPos.x, spawnPos.z, 0.5);
       if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
         continue;
       }
@@ -2872,7 +2899,7 @@ async function initCore(runtimeContext) {
     }
     const fallback = playerModel.position.clone();
     fallback.x += MONSTER_SPAWN_MIN_RADIUS;
-    fallback.y = getTerrainHeight(fallback.x, fallback.z) + 0.5;
+    fallback.y = getSpawnY(fallback.x, fallback.z, 0.5);
     return fallback;
   };
 
@@ -3199,7 +3226,7 @@ async function initCore(runtimeContext) {
 
     if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
       existing.model.position.set(position.x, position.y, position.z);
-      existing.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
+      existing.syncBodyFromTransform?.({ zeroVelocity: true });
     }
 
     if (rotation && Number.isFinite(rotation.x) && Number.isFinite(rotation.y) && Number.isFinite(rotation.z) && Number.isFinite(rotation.w)) {
@@ -3277,7 +3304,7 @@ async function initCore(runtimeContext) {
       },
       applyState: state => {
         if (!state) return;
-        const [px, py, pz] = state.position || [];
+        const [px, , pz] = state.position || [];
         const [rx, ry, rz, rw] = state.rotation || [];
         const current = monsters.find(entry => entry.id === slotId);
         const currentVersion = Number.isFinite(current?.version) ? current.version : -Infinity;
@@ -3301,9 +3328,10 @@ async function initCore(runtimeContext) {
         if (Number.isFinite(state.level)) {
           monster.setLevel(state.level, { preserveHealth: true });
         }
-        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-          monster.model.position.set(px, py, pz);
-          monster.body?.setTranslation({ x: px, y: py, z: pz }, true);
+        if (Number.isFinite(px) && Number.isFinite(pz)) {
+          const resolvedY = getSpawnY(px, pz, 0.5);
+          monster.model.position.set(px, resolvedY, pz);
+          monster.syncBodyFromTransform?.({ zeroVelocity: true });
         }
         if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
           monster.model.quaternion.set(rx, ry, rz, rw);
@@ -4345,7 +4373,7 @@ async function initCore(runtimeContext) {
     const radius = 1.2;
     dropPosition.x += Math.cos(angle) * radius;
     dropPosition.z += Math.sin(angle) * radius;
-    dropPosition.y = getTerrainHeight(dropPosition.x, dropPosition.z) + 0.5;
+    dropPosition.y = getSpawnYWithPolicy(dropPosition.x, dropPosition.z, 0.5, { allowOnBuildings: true });
     return dropPosition;
   }
 
@@ -4558,10 +4586,7 @@ async function initCore(runtimeContext) {
   function spawnWoodPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
+    applySpawnYToPosition(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
     const geometry = new THREE.BoxGeometry(3.0, 0.36, 0.6);
     const material = new THREE.MeshStandardMaterial({
       color: 0x8b5a2b,
@@ -4583,10 +4608,7 @@ async function initCore(runtimeContext) {
   function spawnMeatPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
+    applySpawnYToPosition(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
     const geometry = new THREE.BoxGeometry(1.1, 0.45, 0.7);
     const material = new THREE.MeshStandardMaterial({
       color: 0x6b3f23,
@@ -4608,10 +4630,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
     if (useTerrainHeight) {
-      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-      if (Number.isFinite(terrainHeight)) {
-        spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-      }
+      applySpawnYToPosition(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
     }
     const group = new THREE.Group();
     const pieces = groupedMushrooms > 0 ? groupedMushrooms : 3;
@@ -4685,10 +4704,7 @@ async function initCore(runtimeContext) {
   function spawnZombieBrainsPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
+    applySpawnYToPosition(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
 
     const brainGroup = createZombieBrainsGroup();
     brainGroup.position.copy(spawnPos);
@@ -4716,11 +4732,8 @@ async function initCore(runtimeContext) {
       mesh.getWorldPosition(tempTreePosition);
       appleParent.add(mesh);
       mesh.position.copy(tempTreePosition);
-      const terrainY = getTerrainHeight(tempTreePosition.x, tempTreePosition.z);
-      if (Number.isFinite(terrainY)) {
-        mesh.position.y = terrainY + APPLE_DROP_LIFT;
-        mesh.userData.baseY = mesh.position.y;
-      }
+      mesh.position.y = getSpawnYWithPolicy(tempTreePosition.x, tempTreePosition.z, APPLE_DROP_LIFT, { allowOnBuildings: true });
+      mesh.userData.baseY = mesh.position.y;
       mesh.rotation.y = Math.random() * Math.PI * 2;
     });
   }
@@ -6538,12 +6551,11 @@ async function initCore(runtimeContext) {
   function spawnAmmoPickup(position, amount = AMMO_PICKUP_AMOUNT, options = {}) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     if (options.noFloat) {
       const groundOffset = Number.isFinite(options.groundOffset) ? options.groundOffset : 0.08;
-      spawnPos.y = terrainHeight + groundOffset;
+      spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, groundOffset, { allowOnBuildings: true });
     } else {
-      spawnPos.y = terrainHeight + 0.6;
+      spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.6, { allowOnBuildings: true });
     }
 
     const geometry = options.geometry || new THREE.IcosahedronGeometry(0.25, 0);
@@ -6642,8 +6654,7 @@ async function initCore(runtimeContext) {
   function spawnDroppedAmmoPickup(position, amount, dropId) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.6, { allowOnBuildings: true });
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -6698,10 +6709,11 @@ async function initCore(runtimeContext) {
       } else {
         const entry = droppedAmmoPickups.get(drop.id);
         const mesh = entry?.mesh;
-        const [x, y, z] = drop.position;
-        if (mesh && Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
-          mesh.position.set(x, y, z);
-          mesh.userData.baseY = y;
+        const [x, , z] = drop.position;
+        if (mesh && Number.isFinite(x) && Number.isFinite(z)) {
+          const resolvedY = getSpawnYWithPolicy(x, z, 0.6, { allowOnBuildings: true });
+          mesh.position.set(x, resolvedY, z);
+          mesh.userData.baseY = resolvedY;
         }
       }
     });
@@ -6722,8 +6734,7 @@ async function initCore(runtimeContext) {
   function spawnFoodPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.6, { allowOnBuildings: true });
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -6750,8 +6761,7 @@ async function initCore(runtimeContext) {
   function spawnHealthPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.6, { allowOnBuildings: true });
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -6778,8 +6788,7 @@ async function initCore(runtimeContext) {
   function spawnCoinPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.6, { allowOnBuildings: true });
 
     const geometry = new THREE.CylinderGeometry(0.2, 0.2, 0.06, 24);
     const material = new THREE.MeshStandardMaterial({
@@ -6828,10 +6837,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.5;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.5, { allowOnBuildings: true });
     iceGun.mesh.position.copy(spawnPos);
     iceGun.mesh.quaternion.set(0, 0, 0, 1);
     iceGun.mesh.visible = true;
@@ -6844,10 +6850,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.5;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.5, { allowOnBuildings: true });
     bow.mesh.position.copy(spawnPos);
     bow.mesh.quaternion.set(0, 0, 0, 1);
     bow.mesh.visible = true;
@@ -6879,10 +6882,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.4;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.4, { allowOnBuildings: true });
     bomb.mesh.position.copy(spawnPos);
     bomb.mesh.quaternion.set(0, 0, 0, 1);
     bomb.mesh.visible = true;
@@ -6894,10 +6894,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.5;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.5, { allowOnBuildings: true });
     autumnSword.mesh.position.copy(spawnPos);
     autumnSword.mesh.quaternion.set(0, 0, 0, 1);
     autumnSword.mesh.visible = true;
@@ -6909,10 +6906,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.2;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.2, { allowOnBuildings: true });
     lantern.mesh.position.copy(spawnPos);
     lantern.mesh.quaternion.set(0, 0, 0, 1);
     lantern.mesh.visible = true;
@@ -6924,10 +6918,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.2;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0.2, { allowOnBuildings: true });
     torch.mesh.position.copy(spawnPos);
     torch.mesh.quaternion.set(0, 0, 0, 1);
     torch.mesh.visible = true;
@@ -6940,10 +6931,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, 0, { allowOnBuildings: true });
     treasureChest.mesh.position.copy(spawnPos);
     treasureChest.mesh.visible = true;
     treasureChest.syncCollider?.();
@@ -7249,9 +7237,7 @@ async function initCore(runtimeContext) {
     const configs = getWeaponPickupConfigs().filter(config => config.item?.mesh);
     if (configs.length === 0) return;
     const config = configs[Math.floor(Math.random() * configs.length)];
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-    spawnPos.y = terrainHeight + config.groundOffset;
+    spawnPos.y = getSpawnYWithPolicy(spawnPos.x, spawnPos.z, config.groundOffset, { allowOnBuildings: true });
     createDroppedWeaponPickup(config.item, {
       itemId: config.itemId,
       markerColor: config.markerColor,
@@ -9101,7 +9087,10 @@ async function initCore(runtimeContext) {
     for (const [rb, mesh] of rbToMesh.entries()) {
       const t = rb.translation();
       const r = rb.rotation();
-      mesh.position.set(t.x, t.y, t.z);
+      const bodyYOffset = Number.isFinite(mesh.userData?.physicsBodyYOffset)
+        ? mesh.userData.physicsBodyYOffset
+        : 0;
+      mesh.position.set(t.x, t.y + bodyYOffset, t.z);
       mesh.quaternion.set(r.x, r.y, r.z, r.w);
 
       const isStaticBody = typeof rb.isFixed === 'function' && rb.isFixed();
@@ -9118,7 +9107,7 @@ async function initCore(runtimeContext) {
           if (shouldSnapToGround) {
             const correction = resolvedGroundY - bbox.min.y;
             mesh.position.y += correction;
-            rb.setTranslation({ x: mesh.position.x, y: mesh.position.y, z: mesh.position.z }, true);
+            rb.setTranslation({ x: mesh.position.x, y: mesh.position.y - bodyYOffset, z: mesh.position.z }, true);
             const lv = rb.linvel();
             if (lv.y < 0) {
               rb.setLinvel({ x: lv.x, y: 0, z: lv.z }, true);
