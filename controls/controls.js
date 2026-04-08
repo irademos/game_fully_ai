@@ -35,6 +35,7 @@ const WOOD_INTERACT_RANGE = 3;
 const MEAT_INTERACT_RANGE = 3;
 const SALT_INTERACT_RANGE = 3;
 const ENGAGED_MODE_DISTANCE = 7;
+const ENGAGED_MODE_RELEASE_DISTANCE = 10;
 const WEAPON_CAMERA_OFFSET = new THREE.Vector3(0, 0, -1.8);
 const WEAPON_CAMERA_TARGET_OFFSET = new THREE.Vector3(0.75, 0, 0);
 const WEAPON_CAMERA_FOV_DELTA = 8;
@@ -45,6 +46,7 @@ const ENGAGED_CAMERA_OFFSET = {
   right: 0.65,
   up: 0.4
 };
+const ENGAGED_TARGET_EYE_HEIGHT = 0.9;
 const BED_SLEEP_PROMPT = "click or press 'x' to sleep";
 const BED_WAKE_PROMPT = "click or press 'x' to wake";
 const FRIENDLY_DIALOGUE_POOL = [
@@ -2646,16 +2648,7 @@ export class PlayerControls {
     }
     let desiredCameraPosition;
     let cameraLookTarget = orbitCenter;
-    if (this.firstPersonEnabled) {
-      desiredCameraPosition = orbitCenter.clone().add(new THREE.Vector3(0, 0.62, 0));
-      const cosPitch = Math.cos(this.pitch);
-      const forward = new THREE.Vector3(
-        Math.sin(this.yaw) * cosPitch,
-        Math.sin(this.pitch),
-        Math.cos(this.yaw) * cosPitch
-      ).normalize();
-      cameraLookTarget = desiredCameraPosition.clone().addScaledVector(forward, 10);
-    } else if (this.isEngaged && this.engagedDirection) {
+    if (this.isEngaged && this.engagedDirection) {
       const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
       this.yaw = engagedYaw;
       this.pitch = 0;
@@ -2668,6 +2661,19 @@ export class PlayerControls {
         .add(new THREE.Vector3(0, cameraHeight + ENGAGED_CAMERA_OFFSET.up, 0))
         .add(behindOffset)
         .addScaledVector(engagedRight, ENGAGED_CAMERA_OFFSET.right);
+      const engagedTargetPosition = this.engagedTarget?.model?.position;
+      if (engagedTargetPosition) {
+        cameraLookTarget = engagedTargetPosition.clone().add(new THREE.Vector3(0, ENGAGED_TARGET_EYE_HEIGHT, 0));
+      }
+    } else if (this.firstPersonEnabled) {
+      desiredCameraPosition = orbitCenter.clone().add(new THREE.Vector3(0, 0.62, 0));
+      const cosPitch = Math.cos(this.pitch);
+      const forward = new THREE.Vector3(
+        Math.sin(this.yaw) * cosPitch,
+        Math.sin(this.pitch),
+        Math.cos(this.yaw) * cosPitch
+      ).normalize();
+      cameraLookTarget = desiredCameraPosition.clone().addScaledVector(forward, 10);
     } else {
       const rotatedOffset = new THREE.Vector3(
         offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
@@ -3466,17 +3472,41 @@ export class PlayerControls {
       return;
     }
     const monsters = appContext.entities.monsters || window.monsters || [];
+    const monsterList = Array.isArray(monsters) ? monsters : Object.values(monsters || {});
+    const playerPosition = this.playerModel.position;
+    if (!playerPosition) {
+      this.setEngaged(false);
+      return;
+    }
     let closest = null;
     let closestDistance = Infinity;
-    for (const monster of monsters) {
-      if (!monster?.model || monster.isDead) continue;
-      const distance = this.playerModel.position.distanceTo(monster.model.position);
+    for (const monster of monsterList) {
+      const monsterPosition = monster?.model?.position;
+      if (!monsterPosition || monster.isDead) continue;
+      if (!Number.isFinite(monsterPosition.x) || !Number.isFinite(monsterPosition.z)) continue;
+      const dx = monsterPosition.x - playerPosition.x;
+      const dz = monsterPosition.z - playerPosition.z;
+      const distance = Math.hypot(dx, dz);
       if (distance < closestDistance) {
         closest = monster;
         closestDistance = distance;
       }
     }
-    const shouldEngage = closest && closestDistance <= ENGAGED_MODE_DISTANCE;
+    const engagedTargetPosition = this.engagedTarget?.model?.position;
+    const hasTrackedTarget = Boolean(this.isEngaged && engagedTargetPosition);
+    let trackedTargetDistance = Infinity;
+    if (hasTrackedTarget) {
+      const dx = engagedTargetPosition.x - playerPosition.x;
+      const dz = engagedTargetPosition.z - playerPosition.z;
+      if (Number.isFinite(dx) && Number.isFinite(dz)) {
+        trackedTargetDistance = Math.hypot(dx, dz);
+      }
+    }
+
+    const shouldStayEngaged = hasTrackedTarget
+      && trackedTargetDistance <= ENGAGED_MODE_RELEASE_DISTANCE
+      && !this.engagedTarget?.isDead;
+    const shouldEngage = shouldStayEngaged || (closest && closestDistance <= ENGAGED_MODE_DISTANCE);
     if (shouldEngage) {
       if (!this.isEngaged) {
         this.freeYaw = this.yaw;
@@ -3484,8 +3514,8 @@ export class PlayerControls {
         this.cameraTouchId = null;
       }
       this.isEngaged = true;
-      this.engagedTarget = closest;
-      this.engagedDirection = closest.model.position.clone().sub(this.playerModel.position);
+      this.engagedTarget = shouldStayEngaged ? this.engagedTarget : closest;
+      this.engagedDirection = this.engagedTarget.model.position.clone().sub(this.playerModel.position);
       this.engagedDirection.y = 0;
       if (this.engagedDirection.lengthSq() > 0) {
         this.engagedDirection.normalize();
