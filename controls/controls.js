@@ -3256,6 +3256,10 @@ export class PlayerControls {
     const equippedWeapon = this.getEquippedWeapon(hand);
     if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
       const direction = this.getAutoAimDirection(equippedWeapon) ?? this.getAimDirection(true);
+      if (direction) {
+        this.alignPlayerToDirection(direction);
+        this.applyAutoAimCameraDirection(direction);
+      }
       const position = this.getProjectileSpawnPosition(direction);
       const fired = this.throwBomb(position, direction);
       if (fired) {
@@ -3271,6 +3275,12 @@ export class PlayerControls {
     const usesMissile = gun?.itemId === 'bazooka' && typeof this.spawnMissileProjectile === 'function';
     const autoAimDirection = this.getAutoAimDirection(gun);
     const direction = autoAimDirection ?? (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow));
+    if (direction) {
+      this.alignPlayerToDirection(direction);
+      if (autoAimDirection) {
+        this.applyAutoAimCameraDirection(autoAimDirection);
+      }
+    }
     const position = this.getProjectileSpawnPosition(direction);
 
     this.consumeAmmo();
