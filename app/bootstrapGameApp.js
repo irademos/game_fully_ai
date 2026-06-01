@@ -969,7 +969,8 @@ async function initCore(runtimeContext) {
   const appleItemIds = new Set([APPLE_ITEM_ID]);
   const woodItemIds = new Set([WOOD_ITEM_ID]);
   const CRAB_MEAT_ITEM_ID = 'crab_meat';
-  const meatItemIds = new Set([MEAT_ITEM_ID, CRAB_MEAT_ITEM_ID]);
+  const BIRD_MEAT_ITEM_ID = 'bird_meat';
+  const meatItemIds = new Set([MEAT_ITEM_ID, CRAB_MEAT_ITEM_ID, BIRD_MEAT_ITEM_ID]);
   const zombieBrainsItemIds = new Set([ZOMBIE_BRAINS_ITEM_ID]);
   const saltItemIds = new Set([SALT_ITEM_ID]);
   const sauteedMushroomsItemIds = new Set([SAUTEED_MUSHROOMS_ITEM_ID]);
@@ -4325,13 +4326,15 @@ async function initCore(runtimeContext) {
       if (!wasDead || !position) return;
       notifyAchievementProgress('animalsKilled', 1);
       window.questManager?.handleAnimalKilled?.(animal);
-      const isCrab = String(animal?.type || '').toLowerCase() === 'crab';
+      const animalType = String(animal?.type || '').toLowerCase();
+      const isCrab = animalType === 'crab';
+      const isBird = animalType === 'bird';
       for (let i = 0; i < 2; i += 1) {
         const angle = (i / 2) * Math.PI * 2;
         const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
         spawnMeatPickup(position.clone().add(offset), isCrab
-          ? { itemId: 'crab_meat', color: 0xb22222 }
-          : undefined);
+          ? { itemId: CRAB_MEAT_ITEM_ID, color: 0xb22222 }
+          : (isBird ? { itemId: BIRD_MEAT_ITEM_ID, color: 0xd28f59 } : undefined));
       }
     }
   });
@@ -5797,6 +5800,10 @@ async function initCore(runtimeContext) {
     name: 'Meat',
     icon: ''
   };
+  inventoryCatalog[BIRD_MEAT_ITEM_ID] = {
+    name: 'Bird Meat',
+    icon: ''
+  };
   inventoryCatalog[ZOMBIE_BRAINS_ITEM_ID] = {
     name: 'Zombie Brains',
     icon: ''
@@ -6043,6 +6050,7 @@ async function initCore(runtimeContext) {
     if (itemId === SHIELD_ITEM_ID) return '🛡️';
     if (itemId === APPLE_ITEM_ID) return '🍎';
     if (itemId?.startsWith?.('mushroom_')) return '🍄';
+    if (itemId === BIRD_MEAT_ITEM_ID) return '🐦';
     return '🎒';
   };
 
@@ -14447,7 +14455,7 @@ async function initCore(runtimeContext) {
           (animals || []).forEach((animal) => {
             if (!animal?.model?.position || animal.isDead) return;
             const animalType = String(animal?.type || '').toLowerCase();
-            if (animalType !== 'deer' && animalType !== 'crab' && animalType !== 'fish') return;
+            if (animalType !== 'deer' && animalType !== 'crab' && animalType !== 'fish' && animalType !== 'bird') return;
             const distance = playerPos.distanceTo(animal.model.position);
             if (distance > WEAPON_TARGET_MAX_DISTANCE) return;
             const buttonAnchor = animal.model.position.clone().add(new THREE.Vector3(0, 2.1, 0));
