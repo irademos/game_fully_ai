@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MonsterCharacter } from '../characters/MonsterCharacter.js';
 
-const ANIMAL_TYPES = ['Deer', 'crab', 'fish'];
+const ANIMAL_TYPES = ['Deer', 'crab', 'fish', 'bird'];
 const SPAWN_MIN_RADIUS = 10;
 const SPAWN_MAX_RADIUS = 26;
 const SPAWN_ATTEMPTS = 10;
@@ -20,6 +20,8 @@ const CRAB_CONTACT_DAMAGE_COOLDOWN_MS = 850;
 const CRAB_CONTACT_KNOCKBACK_STRENGTH = 1.8;
 const FISH_BUBBLE_RADIUS = 0.55;
 const FISH_BUBBLE_FLOAT_HEIGHT = 0.5;
+const BIRD_MIN_FLIGHT_HEIGHT = 2.8;
+const BIRD_MAX_FLIGHT_HEIGHT = 6.8;
 
 const loader = new GLTFLoader();
 const animalTemplateCache = new Map();
@@ -36,6 +38,7 @@ const resolveAnimalAssetBaseName = (typeName) => {
   if (lowered === 'deer') return 'Deer';
   if (lowered === 'dog') return 'dog';
   if (lowered === 'fish') return 'fish';
+  if (lowered === 'bird') return 'bird';
   return raw;
 };
 
@@ -212,6 +215,7 @@ async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight, forcedPosi
     stateUntil: Date.now() + randomRange(1800, 4000),
     wanderDir: new THREE.Vector3(),
     runAwayUntil: 0,
+    flightTargetY: null,
     nextHitReactIndex: 0
   };
 
@@ -332,12 +336,22 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   const playerModel = getPlayerModel?.();
   if (!animal?.model || !playerModel?.position) return;
   if (animal.isDead) {
+    if (String(animal.type || '').toLowerCase() === 'bird') {
+      const terrain = getTerrainHeight?.(animal.model.position.x, animal.model.position.z);
+      if (Number.isFinite(terrain)) {
+        const floorY = terrain + 0.4;
+        animal.model.position.y = Math.max(floorY, animal.model.position.y - (3.8 * delta));
+      }
+      const pivot = animal.model.userData?.pivot;
+      if (pivot?.rotation) pivot.rotation.z = Math.PI;
+    }
     animal.update(delta);
     return;
   }
 
   const now = Date.now();
   const behavior = config.behavior || 'runAway';
+  const data = animal.userData || {};
   if (behavior === 'waterBubble') {
     const bubbleData = animal.userData?.bubbleData;
     const terrain = getTerrainHeight?.(animal.model.position.x, animal.model.position.z);
@@ -389,6 +403,40 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
     animal.update(delta);
     return;
   }
+
+  if (behavior === 'idleFly') {
+    if (!Number.isFinite(animal.userData.flightTargetY)) {
+      animal.userData.flightTargetY = randomRange(BIRD_MIN_FLIGHT_HEIGHT, BIRD_MAX_FLIGHT_HEIGHT);
+    }
+    if ((data.state === 'idle' || data.state === 'walk') && now >= (data.decisionAt || 0)) {
+      const shouldFly = Math.random() > 0.2;
+      data.state = shouldFly ? 'walk' : 'idle';
+      data.decisionAt = now + randomRange(1200, 3200);
+      if (shouldFly) {
+        const angle = Math.random() * Math.PI * 2;
+        data.wanderDir = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).normalize();
+      }
+      animal.userData.flightTargetY = randomRange(BIRD_MIN_FLIGHT_HEIGHT, BIRD_MAX_FLIGHT_HEIGHT);
+    }
+
+    if (data.state === 'walk') {
+      if (!data.wanderDir || data.wanderDir.lengthSq() < 0.0001) {
+        data.wanderDir = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+      }
+      animal.model.position.addScaledVector(data.wanderDir, Math.max(0.8, (Number.isFinite(config.walkSpeed) ? config.walkSpeed : 1.2)) * delta);
+      animal.model.lookAt(animal.model.position.clone().add(data.wanderDir));
+    }
+
+    const terrain = getTerrainHeight?.(animal.model.position.x, animal.model.position.z);
+    if (Number.isFinite(terrain)) {
+      const targetY = terrain + (animal.userData.flightTargetY || BIRD_MIN_FLIGHT_HEIGHT);
+      animal.model.position.y += (targetY - animal.model.position.y) * Math.min(1, delta * 2.2);
+    }
+
+    animal.playAnimation('Idle', 0.1);
+    animal.update(delta);
+    return;
+  }
   const fleeDistance = Number.isFinite(config.fleeDistance) ? config.fleeDistance : 8;
   const walkSpeed = Number.isFinite(config.walkSpeed) ? config.walkSpeed : 1.2;
   const runSpeed = Number.isFinite(config.runSpeed) ? config.runSpeed : 4.8;
@@ -401,7 +449,6 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   const companionAttackDamage = Number.isFinite(config.attackDamage) ? Math.max(1, config.attackDamage) : 3;
 
   const distanceToPlayer = animal.model.position.distanceTo(playerModel.position);
-  const data = animal.userData || {};
 
   const isCompanion = !!animal.model?.userData?.isCompanion;
   let nearbyMonster = null;
@@ -685,8 +732,9 @@ export function createAnimalManager({
   const pickWildAnimalType = () => {
     const roll = Math.random();
     if (roll < 0.5) return 'crab';
-    if (roll < 0.82) return 'Deer';
-    return 'fish';
+    if (roll < 0.72) return 'Deer';
+    if (roll < 0.9) return 'fish';
+    return 'bird';
   };
 
   const spawnWildAnimalAt = async (position) => {

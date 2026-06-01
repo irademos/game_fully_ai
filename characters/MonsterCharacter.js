@@ -299,11 +299,13 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.isProvoked = true;
     this.model.userData.mode = "enemy";
     this.showHealthBar();
-    const isCrab = String(this.type || '').toLowerCase() === 'crab';
+    const loweredType = String(this.type || '').toLowerCase();
+    const isCrab = loweredType === 'crab';
+    const isBird = loweredType === 'bird';
     const hitDirection = options?.hitDirection;
     const canApplyCrabKnockback = isCrab && hitDirection?.lengthSq?.() > 0.000001;
 
-    if (isCrab && this.pivot?.rotation) {
+    if ((isCrab || isBird) && this.pivot?.rotation) {
       this.pivot.rotation.z = Math.PI;
     }
     if (canApplyCrabKnockback) {
